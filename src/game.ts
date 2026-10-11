@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
-import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
@@ -13,6 +12,14 @@ import { BOLT_COLORS, Effects } from "./effects";
 import { Environment } from "./environment";
 import { Materials } from "./materials";
 import { WetReflections } from "./reflections";
+import { AmbientOcclusionPass, CompositePass, ScenePass, VolumetricPass } from "./postfx";
+import { EnvironmentProbe } from "./envprobe";
+
+/** In-scattering colours for the volumetric pass (artistic, HDR). */
+const FLOOD_HAZE = new THREE.Color(1, .86, .66).multiplyScalar(1.6);
+const SEARCH_HAZE = new THREE.Color(.8, .9, 1).multiplyScalar(5);
+const FIRE_HAZE = new THREE.Color(1, .42, .12).multiplyScalar(2.5);
+const LAMP_HAZE = new THREE.Color(1, .84, .6).multiplyScalar(.8);
 import { STEP_HEIGHT } from "./navigation";
 import { Viewmodel } from "./weapon";
 import { World } from "./world";
@@ -48,23 +55,56 @@ const GRADE_SHADER = {
     uLowHealth: { value: 0 },
     uFlash: { value: 0 },
     uAds: { value: 0 },
+    uRain: { value: .5 },
+    uAspect: { value: 16 / 9 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
     void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float uTime, uDamage, uLowHealth, uFlash, uAds;
+    uniform float uTime, uDamage, uLowHealth, uFlash, uAds, uRain, uAspect;
     varying vec2 vUv;
     float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233)) + uTime * 7.31) * 43758.5453); }
+    float stable(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453); }
+
+    // Raindrops on the helmet visor: beads that appear, refract the view, and some that run down.
+    // Returns the uv offset (xy) and a rim highlight (z).
+    vec3 visorRain(vec2 uv) {
+      vec3 result = vec3(0.);
+      for (int layer = 0; layer < 3; layer++) {
+        float scale = 7. + float(layer) * 6.;
+        vec2 g = vec2(uv.x * uAspect, uv.y) * scale + vec2(float(layer) * 3.17, 0.);
+        vec2 cell = floor(g);
+        vec2 f = fract(g) - .5;
+        float seed = stable(cell + float(layer) * 19.7);
+        if (seed < .64 - float(layer) * .06) continue;
+        float life = fract(uTime * (.09 + seed * .12) + seed * 9.1);
+        float runs = step(.82, stable(cell + 5.3));
+        vec2 center = vec2((stable(cell + 3.7) - .5) * .55, (stable(cell + 8.1) - .5) * .5 - runs * life * .9);
+        float radius = (.07 + .1 * stable(cell + 9.1)) * (1. - life * .55);
+        vec2 d = (f - center) * vec2(1., .85);
+        float dist = length(d);
+        float bead = smoothstep(radius, radius * .55, dist) * smoothstep(1., .75, life) * smoothstep(0., .05, life);
+        // Trail left by a running drop.
+        float trail = runs * smoothstep(.035, 0., abs(f.x - center.x)) * step(center.y, f.y) * step(f.y, center.y + life * .9) * .35 * (1. - life);
+        result.xy += -d / scale * bead * 1.4 + vec2(0., .003) * trail;
+        result.z += bead * .15 + trail * .1;
+      }
+      return result;
+    }
+
     void main() {
-      vec2 c = vUv - .5;
+      vec3 rain = visorRain(vUv) * uRain;
+      vec2 uv = vUv + rain.xy;
+      vec2 c = uv - .5;
       float r2 = dot(c, c);
       float ca = (.0012 + uDamage * .006) * (1. + r2 * 4.);
       vec3 col;
-      col.r = texture2D(tDiffuse, vUv + c * ca).r;
-      col.g = texture2D(tDiffuse, vUv).g;
-      col.b = texture2D(tDiffuse, vUv - c * ca).b;
+      col.r = texture2D(tDiffuse, uv + c * ca).r;
+      col.g = texture2D(tDiffuse, uv).g;
+      col.b = texture2D(tDiffuse, uv - c * ca).b;
+      col += rain.z * .05;
       float luma = dot(col, vec3(.299, .587, .114));
       // Cool shadows, slightly warm highlights.
       col += vec3(-.006, .004, .014) * (1. - luma);
@@ -84,10 +124,18 @@ const nextFrame = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
 
 export class KaminoGame {
   private readonly scene = new THREE.Scene();
-  private readonly camera = new THREE.PerspectiveCamera(74, innerWidth / innerHeight, .03, 2600);
+  private readonly camera = new THREE.PerspectiveCamera(74, Math.max(1, innerWidth) / Math.max(1, innerHeight), .03, 1600);
   private readonly renderer: THREE.WebGLRenderer;
   private composer!: EffectComposer;
   private bloom!: UnrealBloomPass;
+  private envProbe!: EnvironmentProbe;
+  private renderDelta = 1 / 60;
+  private probeVisibility: boolean[] = [];
+  private probeStrength = 1;
+  private scenePass!: ScenePass;
+  private aoPass!: AmbientOcclusionPass;
+  private volumePass!: VolumetricPass;
+  private compositePass!: CompositePass;
   private grade!: ShaderPass;
   private readonly controls: PointerLockControls;
   private readonly timer = new THREE.Timer();
@@ -208,6 +256,7 @@ export class KaminoGame {
     this.camera.lookAt(0, 1.5, 30);
     this.setupMission();
     await progress(.88, "Compiling shaders…");
+    this.envProbe = new EnvironmentProbe(this.renderer, this.scene);
     this.createPostProcessing();
     this.applyQuality(this.quality);
     this.renderer.compile(this.scene, this.camera);
@@ -238,9 +287,17 @@ export class KaminoGame {
 
   private createPostProcessing(): void {
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
-    const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: this.quality === "low" ? 0 : 4 });
+    // MSAA lives on the scene pass (which also captures depth); the ping-pong buffers don't need it.
+    const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType });
     this.composer = new EffectComposer(this.renderer, target);
-    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.scenePass = new ScenePass(this.scene, this.camera, this.quality === "low" ? 0 : 4);
+    this.aoPass = new AmbientOcclusionPass(this.camera, this.scenePass);
+    this.volumePass = new VolumetricPass(this.camera, this.scenePass);
+    this.compositePass = new CompositePass(this.camera, this.scenePass, this.aoPass, this.volumePass);
+    this.composer.addPass(this.scenePass);
+    this.composer.addPass(this.aoPass);
+    this.composer.addPass(this.volumePass);
+    this.composer.addPass(this.compositePass);
     // Very glossy wet metal under bright lights can overflow half floats; one Inf/NaN pixel would
     // otherwise be smeared across the whole frame by bloom.
     this.composer.addPass(new ShaderPass({
@@ -272,6 +329,9 @@ export class KaminoGame {
     this.renderer.setPixelRatio(ratio);
     this.composer.setPixelRatio(ratio);
     this.reflections.enabled = quality !== "low";
+    this.aoPass.enabled = quality === "high";
+    this.volumePass.enabled = quality !== "low";
+    this.envProbe.interval = quality === "high" ? 1.5 : quality === "medium" ? 4 : Infinity;
     this.reflections.scale = quality === "high" ? .5 : .33;
     this.viewSize = { width: -1, height: -1 };
     this.syncSize();
@@ -427,6 +487,7 @@ export class KaminoGame {
     this.viewSize = { width, height };
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    (this.grade.uniforms.uAspect as THREE.IUniform).value = width / height;
     this.renderer.setSize(width, height);
     this.composer.setSize(width, height);
     this.reflections.setSize(width * this.renderer.getPixelRatio(), height * this.renderer.getPixelRatio());
@@ -483,6 +544,7 @@ export class KaminoGame {
     this.syncSize();
     this.timer.update();
     const delta = Math.min(this.timer.getDelta(), .05);
+    this.renderDelta = delta;
     const simulating = this.started && !this.ended && !this.paused;
     // Game time stands still while paused so scheduled mission events wait too.
     if (simulating || !this.started) this.time += delta;
@@ -542,9 +604,55 @@ export class KaminoGame {
     (this.grade.uniforms.uDamage as THREE.IUniform).value = damage;
     (this.grade.uniforms.uLowHealth as THREE.IUniform).value = this.dead ? 1 : THREE.MathUtils.clamp((40 - this.health) / 40, 0, 1);
     this.camera.updateMatrixWorld();
-    this.reflections.render(this.renderer, this.scene, this.camera, [this.viewmodel.root, ...this.env.reflectionHidden]);
-    this.composer.render();
+    const hidden = [this.viewmodel.root, ...this.env.reflectionHidden];
+    this.envProbe.update(this.renderDelta, this.camera.position, () => {
+      this.probeVisibility = hidden.map((object) => object.visible);
+      hidden.forEach((object) => object.visible = false);
+      this.probeStrength = this.reflections.uniforms.uReflectStrength.value;
+      this.reflections.uniforms.uReflectStrength.value = 0;
+    }, () => {
+      hidden.forEach((object, i) => object.visible = this.probeVisibility[i]);
+      this.reflections.uniforms.uReflectStrength.value = this.probeStrength;
+    });
+    this.reflections.render(this.renderer, this.scene, this.camera, hidden);
+    this.updateVolumeLights();
+    this.compositePass.ads = this.ads;
+    (this.grade.uniforms.uRain as THREE.IUniform).value = this.started ? .55 + Math.max(0, this.camera.rotation.x) * .6 : .35;
+    this.composer.render(this.renderDelta);
     this.camera.quaternion.copy(saved);
+  }
+
+  /** Feed the volumetric pass: floodlights, gunship searchlights, the crash fire, lamps and live flashes. */
+  private updateVolumeLights(): void {
+    const volume = this.volumePass;
+    if (!volume.enabled) return;
+    volume.spots.length = 0;
+    volume.points.length = 0;
+    for (const spot of this.world.spotLights) {
+      volume.spots.push({ position: spot.position, direction: spot.target.position.clone().sub(spot.position), angle: spot.angle, color: FLOOD_HAZE });
+    }
+    const quaternion = new THREE.Quaternion();
+    for (const beam of this.world.searchBeams) {
+      volume.spots.push({
+        position: beam.getWorldPosition(new THREE.Vector3()),
+        direction: new THREE.Vector3(0, -1, 0).applyQuaternion(beam.getWorldQuaternion(quaternion)),
+        angle: Math.atan(9 / 46),
+        color: SEARCH_HAZE,
+      });
+    }
+    const fire = this.world.crashFire;
+    volume.points.push({ position: fire.position, color: FIRE_HAZE.clone().multiplyScalar(fire.intensity / 320), range: 30 });
+    for (const light of this.effects.activeLights().slice(0, 3)) {
+      volume.points.push({ position: light.position, color: light.color.clone().multiplyScalar(Math.min(6, light.intensity / 40)), range: Math.max(4, light.distance * .8) });
+    }
+    const lamps = this.world.lampLights
+      .filter((lamp) => lamp.position.distanceTo(this.camera.position) < 70)
+      .sort((a, b) => a.position.distanceToSquared(this.camera.position) - b.position.distanceToSquared(this.camera.position));
+    for (const lamp of lamps) {
+      if (volume.points.length >= 6) break;
+      volume.points.push({ position: lamp.position, color: LAMP_HAZE, range: 9 });
+    }
+    volume.flash = this.env.flash.strength;
   }
 
   private updateLighting(): void {

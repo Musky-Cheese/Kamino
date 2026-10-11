@@ -65,6 +65,11 @@ export class Effects {
 
   get shake(): number { return this.shakeAmount; }
 
+  /** Currently lit pooled lights (explosions, impacts, muzzle flashes), brightest first. */
+  activeLights(): THREE.PointLight[] {
+    return this.lights.filter((slot) => slot.ttl > 0 && slot.light.intensity > 1).map((slot) => slot.light).sort((a, b) => b.intensity - a.intensity);
+  }
+
   addShake(amount: number): void { this.shakeAmount = Math.min(1.4, this.shakeAmount + amount); }
 
   flash(position: THREE.Vector3, color: THREE.ColorRepresentation, intensity: number, life: number, distance = 12): void {

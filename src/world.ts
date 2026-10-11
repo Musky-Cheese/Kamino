@@ -58,6 +58,9 @@ export class World {
   readonly allyCover: CoverPoint[][] = ZONES.map(() => []);
   readonly captureMarkers: Array<{ group: THREE.Group; ring: THREE.Mesh; beam: THREE.Mesh; fill: THREE.Mesh }> = [];
   readonly spotLights: THREE.SpotLight[] = [];
+  readonly lampLights: THREE.PointLight[] = [];
+  /** Gunship searchlight cones; the beam points down local -Y. */
+  readonly searchBeams: THREE.Mesh[] = [];
   readonly crashFire = new THREE.PointLight(0xff7a2a, 0, 60, 1.6);
   readonly crashSmokeOrigin = new THREE.Vector3();
   /** Spots around the city where the wider battle flares up (for ambient fire and explosions). */
@@ -270,6 +273,7 @@ export class World {
       const light = new THREE.PointLight(0xffd9a8, 22, 16, 2);
       light.position.set(mid.x, 3.4, mid.y);
       this.scene.add(light);
+      this.lampLights.push(light);
     }
   }
 
@@ -376,13 +380,7 @@ export class World {
     this.scene.add(spot, spot.target);
     this.spotLights.push(spot);
 
-    const length = head.distanceTo(target) * .92;
-    const coneGeometry = new THREE.ConeGeometry(Math.tan(.5) * length, length, 32, 1, true).translate(0, -length / 2, 0);
-    const cone = new THREE.Mesh(coneGeometry, lightConeMaterial(0xffe2b8, .07));
-    cone.position.copy(head);
-    cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), target.clone().sub(head).normalize());
-    cone.renderOrder = 4;
-    this.scene.add(cone);
+    // The visible beam itself comes from the volumetric light pass.
   }
 
   private captureMarker(zone: Zone): void {
@@ -622,9 +620,11 @@ export class World {
     for (let i = 0; i < 3; i++) {
       const gunship = buildGunship(this.m);
       gunship.group.traverse((object) => { if (object instanceof THREE.Mesh) { object.castShadow = false; object.receiveShadow = false; } });
-      const beam = new THREE.Mesh(new THREE.ConeGeometry(9, 46, 24, 1, true).translate(0, -23, 0), lightConeMaterial(0xdff4ff, .05));
+      // A faint cone keeps the beam readable beyond the volumetric pass's range.
+      const beam = new THREE.Mesh(new THREE.ConeGeometry(9, 46, 24, 1, true).translate(0, -23, 0), lightConeMaterial(0xdff4ff, .025));
       beam.rotation.x = -.5;
       gunship.searchlight.add(beam);
+      this.searchBeams.push(beam);
       this.scene.add(gunship.group);
       this.flyers.push({
         group: gunship.group, blinkers: gunship.blinkers, radius: 95 + i * 38, height: 30 + i * 9,
