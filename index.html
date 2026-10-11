@@ -3,30 +3,41 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#071521" />
-    <title>Kamino — Multiplayer Prototype</title>
+    <meta name="theme-color" content="#07131c" />
+    <title>Kamino — Phase One</title>
   </head>
   <body>
-    <main id="app">
+    <main id="game" aria-label="Kamino first-person game">
       <section id="menu" class="panel">
-        <p class="eyebrow">UNOFFICIAL FAN-MADE PROTOTYPE</p>
+        <p class="eyebrow">Phase one · unofficial fan-made prototype</p>
         <h1>KAMINO</h1>
-        <p class="subtitle">Clones and droids clash above the storm.</p>
-        <label>
-          Callsign
-          <input id="callsign" maxlength="16" autocomplete="nickname" placeholder="CT-1010" />
-        </label>
-        <button id="deploy" type="button">Deploy</button>
-        <button id="practice" class="secondary" type="button">Practice Offline</button>
-        <p id="status">Connecting to the battle network…</p>
-        <p class="controls">WASD to move · mouse to aim · click to fire</p>
+        <p class="mission-copy">Tipoca City is under attack. Enter the rain courtyard and eliminate the droid strike team before it reaches the cloning facilities.</p>
+        <button id="start" type="button">Begin mission</button>
+        <div class="controls" aria-label="Controls">
+          <span><kbd>WASD</kbd> Move</span><span><kbd>Mouse</kbd> Look</span>
+          <span><kbd>Click</kbd> Fire</span><span><kbd>R</kbd> Reload</span>
+          <span><kbd>Shift</kbd> Sprint</span><span><kbd>Esc</kbd> Pause</span>
+        </div>
+        <p class="disclaimer">A non-commercial fan project. No official Star Wars assets are used.</p>
       </section>
-      <div id="game"></div>
-      <div id="hud" hidden>
-        <div id="score"><span class="clone">CLONES 0</span><span class="droid">DROIDS 0</span></div>
-        <div id="identity"></div>
-        <div id="health"></div>
-      </div>
+
+      <section id="hud" class="hidden" aria-live="polite">
+        <div class="objective"><small>MISSION</small><strong>Secure the rain courtyard</strong></div>
+        <div class="enemy-count"><small>DROIDS</small><strong id="enemies">5</strong></div>
+        <div id="reticle" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b></div>
+        <div id="hit-marker" aria-hidden="true">×</div>
+        <p id="mission-message"></p>
+        <div class="health"><small>ARMOR INTEGRITY</small><div class="meter"><i id="health-bar"></i></div><strong id="health">100</strong></div>
+        <div class="ammo"><small>DC-15S</small><strong id="ammo">20</strong><span>/ 20</span></div>
+      </section>
+
+      <section id="result" class="panel hidden">
+        <p class="eyebrow" id="result-kicker">Mission complete</p>
+        <h2 id="result-title">PLATFORM SECURED</h2>
+        <p id="result-copy">The droid strike team has been neutralized.</p>
+        <button id="restart" type="button">Run mission again</button>
+      </section>
+      <div id="damage-flash" aria-hidden="true"></div>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
