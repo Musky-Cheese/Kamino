@@ -2,7 +2,6 @@ import * as THREE from "three";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
-import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
@@ -88,7 +87,6 @@ export class KaminoGame {
   private readonly camera = new THREE.PerspectiveCamera(74, innerWidth / innerHeight, .03, 2600);
   private readonly renderer: THREE.WebGLRenderer;
   private composer!: EffectComposer;
-  private gtao!: GTAOPass;
   private bloom!: UnrealBloomPass;
   private grade!: ShaderPass;
   private readonly controls: PointerLockControls;
@@ -160,7 +158,8 @@ export class KaminoGame {
   private readonly $ = <T extends HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 
   constructor(private readonly root: HTMLElement) {
-    this.quality = (localStorage.getItem("kamino.quality") as Quality | null) ?? "medium";
+    // Default to High; the performance watchdog steps down once if the machine struggles.
+    this.quality = (localStorage.getItem("kamino.quality") as Quality | null) ?? "high";
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance", stencil: false });
     this.renderer.setSize(innerWidth, innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -242,10 +241,6 @@ export class KaminoGame {
     const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: this.quality === "low" ? 0 : 4 });
     this.composer = new EffectComposer(this.renderer, target);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.gtao = new GTAOPass(this.scene, this.camera, innerWidth, innerHeight);
-    this.gtao.blendIntensity = .85;
-    this.gtao.updateGtaoMaterial({ radius: .5, distanceExponent: 1.5, thickness: 1, scale: 1.2, samples: 12 });
-    this.composer.addPass(this.gtao);
     // Very glossy wet metal under bright lights can overflow half floats; one Inf/NaN pixel would
     // otherwise be smeared across the whole frame by bloom.
     this.composer.addPass(new ShaderPass({
@@ -273,12 +268,11 @@ export class KaminoGame {
     this.quality = quality;
     localStorage.setItem("kamino.quality", quality);
     document.querySelectorAll<HTMLSelectElement>(".quality-select").forEach((select) => select.value = quality);
-    const ratio = quality === "high" ? Math.min(devicePixelRatio, 1.5) : quality === "medium" ? Math.min(devicePixelRatio, 1.15) : Math.min(devicePixelRatio, .85);
+    const ratio = quality === "high" ? Math.min(devicePixelRatio * 1.25, 2) : quality === "medium" ? Math.min(devicePixelRatio, 1.25) : Math.min(devicePixelRatio, 1) * .8;
     this.renderer.setPixelRatio(ratio);
     this.renderer.setSize(innerWidth, innerHeight);
     this.composer.setPixelRatio(ratio);
     this.composer.setSize(innerWidth, innerHeight);
-    this.gtao.enabled = quality === "high";
     this.reflections.enabled = quality !== "low";
     this.reflections.scale = quality === "high" ? .5 : .33;
     this.reflections.setSize(innerWidth * ratio, innerHeight * ratio);
@@ -669,6 +663,7 @@ export class KaminoGame {
     const side = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
     direction.addScaledVector(side, Math.cos(theta) * Math.tan(spread)).addScaledVector(up, Math.sin(theta) * Math.tan(spread)).normalize();
 
+    this.battle.refreshHitboxes();
     this.raycaster.set(this.camera.position, direction);
     this.raycaster.far = 400;
     this.raycaster.firstHitOnly = true;

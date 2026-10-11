@@ -230,6 +230,11 @@ export class Battle {
     return z.center.clone();
   }
 
+  /** Bring droid hit meshes up to date with this frame's animation before raycasting against them. */
+  refreshHitboxes(): void {
+    for (const actor of this.actors) if (actor.alive && actor.team === "separatist") actor.rig.root.updateMatrixWorld(true);
+  }
+
   aliveCount(team: Team, zone?: number): number {
     return this.actors.filter((actor) => actor.alive && actor.team === team && (zone === undefined || actor.zone === zone)).length;
   }

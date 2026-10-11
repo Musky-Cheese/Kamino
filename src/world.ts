@@ -394,7 +394,7 @@ export class World {
     const fill = new THREE.Mesh(new THREE.RingGeometry(0, 4.3, 96, 1, 0, .001).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(.3, 1.2, 1.9), transparent: true, opacity: .22, depthWrite: false, side: THREE.DoubleSide }));
     fill.position.y = .005;
     const beam = new THREE.Mesh(new THREE.CylinderGeometry(4.4, 4.4, 9, 64, 1, true), lightConeMaterial(0x7fdcff, .12));
-    (beam.material as THREE.ShaderMaterial).uniforms.uStrength.value = .16;
+    (beam.material as THREE.ShaderMaterial).uniforms.uStrength.value = .3;
     beam.geometry.rotateX(Math.PI);
     beam.position.y = 4.5;
     group.add(ring, fill, beam);

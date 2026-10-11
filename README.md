@@ -21,7 +21,7 @@ Kill enough droids in a sector and the survivors **fall back** to the next platf
 
 - Tipoca City built procedurally: saucer platforms on stilts above a Gerstner-wave ocean, the great dome with a crashed Separatist lander still burning on top, the needle tower, hangar wing and a horizon of stilt cities
 - Night storm: GPU rain, ground splashes, lightning bolts that light the clouds and the city, rolling thunder delayed by distance, drifting fog banks
-- Wet-deck planar reflections, image-based lighting, shadows, bloom, ambient occlusion (High), film grade
+- Wet-deck planar reflections, image-based lighting, shadows, bloom, film grade
 - Droid and clone AI that takes cover, peeks, fires in bursts, advances, retreats across bridges and gets reinforced
 - Projectile blaster bolts with near-miss feedback, scorch marks, sparks, droids that shatter into pieces
 - DC-15A with aim-down-sights, recoil, spread, reload, ammo counter on the rifle; thermal detonators
