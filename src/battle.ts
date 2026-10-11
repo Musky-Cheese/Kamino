@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { animateRig, buildRig, type ActorKind, type Rig } from "./actors";
+import { buildRig, type ActorKind, type Rig } from "./actors";
 import type { BlasterVoice, GameAudio } from "./audio";
 import { ZONES } from "./config";
 import { BOLT_COLORS, Effects } from "./effects";
@@ -289,7 +289,7 @@ export class Battle {
       this.effects.flash(chest, 0xff9a40, actor.kind === "b2" ? 120 : 40, .25, 9);
       this.effects.smoke(chest, .9, 2.2, 0x26292c, .7, .5);
       if (actor.kind === "b2") this.effects.explosion(chest, .55);
-      this.effects.shatter(actor.rig.meshes.slice(), direction.clone().setY(0).normalize(), Math.min(2.4, .8 + amount / 50));
+      this.effects.shatter(actor.rig.pieces(), direction.clone().setY(0).normalize(), Math.min(2.4, .8 + amount / 50));
       this.scene.remove(actor.rig.root);
       this.audio.droidBreak(chest);
       this.events.droidKilled(actor, byPlayer, headshot);
@@ -477,14 +477,12 @@ export class Battle {
     actor.crouch = THREE.MathUtils.lerp(actor.crouch, wantCrouch, Math.min(1, delta * 5));
     actor.height = actor.rig.height * (1 - actor.crouch * .3);
     actor.flinch = Math.max(0, actor.flinch - delta * 5);
-    animateRig(actor.rig, actor.walkPhase, stride, actor.aimPitch - actor.flinch * .35, time + actor.walkPhase, actor.crouch);
+    actor.rig.animate({ delta, time: time + actor.walkPhase, phase: actor.walkPhase, stride, aimPitch: actor.aimPitch, crouch: actor.crouch, flinch: actor.flinch, firing });
   }
 
   private animateDead(actor: Actor, delta: number): void {
     actor.deadTime += delta;
-    const t = Math.min(1, actor.deadTime / .55);
-    actor.rig.root.rotation.x = -t * t * Math.PI / 2 * .96;
-    actor.rig.pelvis.position.y = actor.rig.hipHeight * (1 - t * .75);
+    actor.rig.animateDeath(actor.deadTime, delta);
     if (actor.deadTime > 30) {
       this.scene.remove(actor.rig.root);
       this.actors.splice(this.actors.indexOf(actor), 1);

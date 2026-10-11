@@ -4,7 +4,7 @@
 import path from "node:path";
 import { NodeIO, getBounds } from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
-import { dedup, flatten, join, meshopt, palette, prune, resample, simplify, textureCompress, weld } from "@gltf-transform/functions";
+import { dedup, flatten, join, meshopt, palette, prune, resample, simplify, textureCompress, transformPrimitive, weld } from "@gltf-transform/functions";
 import { MeshoptDecoder, MeshoptEncoder, MeshoptSimplifier } from "meshoptimizer";
 import sharp from "sharp";
 
@@ -14,11 +14,20 @@ const SOURCES = {
   // The export also holds an MTT near the origin; keep only the C-9979 ~650 m away. Its flat
   // colours are swapped for the game's Separatist hull materials at load, so skip the palette pass.
   lander: { dir: "c-9979_landing_craft", textureSize: 1024, keep: (b) => b.min[0] < -300, palette: false },
-  // Skinned, 66-bone humanoid; trimmed under 30k triangles.
-  clone: { dir: "clone", textureSize: 2048, simplifyRatio: .86 },
-  // Rigid parts parented to bone nodes: keep the hierarchy intact.
+  // Skinned, 66-bone humanoid; trimmed under 30k triangles. Sketchfab's export only binds the first
+  // mesh (armour) correctly; the undersuit and helmet vertices are in other spaces. These column-major
+  // matrices move them into the armour's bind space: the undersuit one is a similarity fit of per-bone
+  // vertex centroids to bone midpoints, the helmet one uses the same rotation, sized and seated on the head joint.
+  clone: {
+    dir: "clone", textureSize: 1024, simplifyRatio: .86, rigid: true,
+    rebind: {
+      Undersuit: [-0.22809, 0.00049, -0.00004, 0, -0.0005, -0.22764, 0.0142, 0, 0, 0.0142, 0.22764, 0, -0.00809, 0.03848, -0.02524, 1],
+      Helmet_Phase1: [-0.05546, 0, 0, 0, 0, -0.05535, 0.00348, 0, 0, 0.00348, 0.05535, 0, -0.04651, 0.45001, 0.05612, 1],
+    },
+  },
+  // Rigid parts parented to bone nodes: keep the hierarchy intact (as for all skinned characters).
   b1: { dir: "battle_droid_b1", textureSize: 2048, rigid: true },
-  b2: { dir: "b2", textureSize: 1024 },
+  b2: { dir: "b2", textureSize: 1024, rigid: true },
   // Animation library: skeleton and the clips the game uses, no mesh.
   anims: {
     file: "ual/Universal Animation Library[Standard]/Unreal-Godot/UAL1_Standard.glb",
@@ -44,8 +53,44 @@ for (const [name, source] of Object.entries(SOURCES)) {
       if (node.getMesh() && !source.keep(getBounds(node))) node.dispose();
     }
   }
+  if (source.rebind) {
+    for (const mesh of graph.listMeshes()) {
+      for (const primitive of mesh.listPrimitives()) {
+        const matrix = source.rebind[primitive.getMaterial()?.getName()];
+        if (matrix) transformPrimitive(primitive, matrix);
+        // A few undersuit vertices have no skin weights (later normalised onto the skeleton root, below
+        // the feet): drop the triangles that use them, or they stretch into spikes once the body moves.
+        const joints = primitive.getAttribute("JOINTS_0"), weights = primitive.getAttribute("WEIGHTS_0"), indices = primitive.getIndices();
+        if (!joints || !weights || !indices) continue;
+        const stray = (i) => weights.getElement(i, []).reduce((sum, w) => sum + w, 0) < .5;
+        const kept = [];
+        for (let t = 0; t < indices.getCount(); t += 3) {
+          const tri = [indices.getScalar(t), indices.getScalar(t + 1), indices.getScalar(t + 2)];
+          if (!tri.some(stray)) kept.push(...tri);
+        }
+        if (kept.length < indices.getCount()) indices.setArray(new Uint32Array(kept));
+      }
+    }
+  }
   if (source.clips) {
-    for (const animation of graph.listAnimations()) if (!source.clips.includes(animation.getName())) animation.dispose();
+    const dropAnimation = (animation) => {
+      animation.listSamplers().forEach((sampler) => sampler.dispose());
+      animation.listChannels().forEach((channel) => channel.dispose());
+      animation.dispose();
+    };
+    for (const animation of graph.listAnimations()) if (!source.clips.includes(animation.getName())) dropAnimation(animation);
+    // Only body rotations (plus pelvis / root translation, which carries the fall in Death01) are retargeted.
+    for (const animation of graph.listAnimations()) {
+      for (const channel of animation.listChannels()) {
+        const node = channel.getTargetNode()?.getName() ?? "";
+        const path = channel.getTargetPath();
+        const finger = /index|middle|ring|pinky|thumb|leaf/.test(node);
+        if (finger || path === "scale" || (path === "translation" && node !== "pelvis" && node !== "root")) {
+          channel.getSampler()?.dispose();
+          channel.dispose();
+        }
+      }
+    }
     for (const node of graph.listNodes()) { node.setMesh(null); node.setSkin(null); }
     for (const material of graph.listMaterials()) material.dispose();
     for (const texture of graph.listTextures()) texture.dispose();
@@ -59,6 +104,8 @@ for (const [name, source] of Object.entries(SOURCES)) {
   if (source.textureSize) steps.push(textureCompress({ encoder: sharp, targetFormat: "webp", resize: [source.textureSize, source.textureSize] }));
   steps.push(meshopt({ encoder: MeshoptEncoder, level: "medium" }));
   await document.transform(...steps);
+  // Sampler data dropped above can outlive prune(); remove accessors nothing but the root references.
+  for (const accessor of graph.listAccessors()) if (accessor.listParents().every((parent) => parent === graph)) accessor.dispose();
   const out = path.join("public", "models", `${name}.glb`);
   await io.write(out, document);
   let triangles = 0;

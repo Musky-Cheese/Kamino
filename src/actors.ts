@@ -1,11 +1,45 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { grimeTextures } from "./textures";
+import { buildModelRig } from "./characters";
 import { taperedBox } from "./vehicles";
 
 export type ActorKind = "b1" | "b2" | "clone";
 
+/** What the AI tells a rig each frame. */
+export type Pose = {
+  delta: number;
+  time: number;
+  /** Distance-driven gait phase. */
+  phase: number;
+  /** Ground speed relative to a brisk walk (0 = standing, ~1.3 = running). */
+  stride: number;
+  /** Radians; negative aims up. */
+  aimPitch: number;
+  crouch: number;
+  /** 1 on the frame a hit lands, decaying to 0. */
+  flinch: number;
+  firing: boolean;
+};
+
+/** A character the battle can drive: procedural primitives or a loaded, animated model. */
 export type Rig = {
+  root: THREE.Group;
+  /** Subtree whose meshes count as head hits. */
+  head: THREE.Object3D;
+  muzzle: THREE.Object3D;
+  /** Meshes bolts and the player's shots are tested against (may be invisible proxies). */
+  meshes: THREE.Mesh[];
+  hipHeight: number;
+  height: number;
+  animate(pose: Pose): void;
+  /** Fall for actors that stay on the field (clones); `t` is seconds since death. */
+  animateDeath(t: number, delta: number): void;
+  /** Visible pieces for the droid shatter effect (detached from the rig by the caller). */
+  pieces(): THREE.Mesh[];
+};
+
+type ProceduralRig = {
   root: THREE.Group;
   pelvis: THREE.Group;
   spine: THREE.Group;
@@ -32,7 +66,7 @@ type Palette = {
 
 let palette: Palette | null = null;
 
-function materials(): Palette {
+export function materials(): Palette {
   if (palette) return palette;
   const tan = grimeTextures(301, [196, 174, 128], 1.3);
   const steel = grimeTextures(317, [104, 116, 132], 1);
@@ -80,8 +114,39 @@ class RigBuilder {
 
 const cyl = (r0: number, r1: number, h: number, seg = 10) => new THREE.CylinderGeometry(r0, r1, h, seg);
 
+/** E-5 carbine, barrel along +Z. */
+export function buildE5(): { group: THREE.Group; muzzle: THREE.Object3D; meshes: THREE.Mesh[] } {
+  const p = materials();
+  const b = new RigBuilder();
+  const gun = new THREE.Group();
+  b.part(gun, new THREE.BoxGeometry(.05, .07, .42), p.gun, 0, 0, 0);
+  b.part(gun, cyl(.016, .016, .34), p.gun, 0, .012, .36, Math.PI / 2);
+  b.part(gun, new THREE.BoxGeometry(.035, .1, .05), p.gun, 0, -.07, -.05, .3);
+  b.part(gun, new THREE.BoxGeometry(.04, .05, .18), p.gun, 0, -.01, -.27);
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, .012, .54);
+  gun.add(muzzle);
+  return { group: gun, muzzle, meshes: b.meshes };
+}
+
+/** DC-15A blaster rifle, barrel along +Z. */
+export function buildDC15(): { group: THREE.Group; muzzle: THREE.Object3D; meshes: THREE.Mesh[] } {
+  const p = materials();
+  const b = new RigBuilder();
+  const gun = new THREE.Group();
+  b.part(gun, new THREE.BoxGeometry(.06, .08, .5), p.gun, 0, 0, 0);
+  b.part(gun, cyl(.022, .022, .5, 10), p.gun, 0, .01, .48, Math.PI / 2);
+  b.part(gun, new THREE.BoxGeometry(.04, .12, .05), p.gun, 0, -.08, -.08, .3);
+  b.part(gun, cyl(.016, .016, .12), p.gunLight, 0, .065, .02, Math.PI / 2);
+  b.part(gun, new THREE.BoxGeometry(.03, .04, .22), p.gun, 0, -.01, -.33);
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, .01, .75);
+  gun.add(muzzle);
+  return { group: gun, muzzle, meshes: b.meshes };
+}
+
 /** B1 battle droid: spindly, skull-like head tube, E-5 blaster. ~1.91 m. */
-function buildB1(): Rig {
+function buildB1(): ProceduralRig {
   const p = materials();
   const b = new RigBuilder();
   const root = new THREE.Group();
@@ -138,7 +203,7 @@ function buildB1(): Rig {
 }
 
 /** B2 super battle droid: hunched armoured torso, wrist blasters. ~2.0 m. */
-function buildB2(): Rig {
+function buildB2(): ProceduralRig {
   const p = materials();
   const b = new RigBuilder();
   const root = new THREE.Group();
@@ -186,7 +251,7 @@ function buildB2(): Rig {
 }
 
 /** Phase I clone trooper with DC-15A. ~1.83 m. */
-function buildClone(rank: number): Rig {
+function buildClone(rank: number): ProceduralRig {
   const p = materials();
   const b = new RigBuilder();
   const root = new THREE.Group();
@@ -263,14 +328,28 @@ function buildClone(rank: number): Rig {
   };
 }
 
+/** A loaded model when available, otherwise the procedural stand-in. */
 export function buildRig(kind: ActorKind, variant = 0): Rig {
-  if (kind === "b1") return buildB1();
-  if (kind === "b2") return buildB2();
-  return buildClone(variant);
+  const model = buildModelRig(kind);
+  if (model) return model;
+  return procedural(kind === "b1" ? buildB1() : kind === "b2" ? buildB2() : buildClone(variant));
+}
+
+function procedural(rig: ProceduralRig): Rig {
+  return {
+    root: rig.root, head: rig.head, muzzle: rig.muzzle, meshes: rig.meshes, hipHeight: rig.hipHeight, height: rig.height,
+    animate: (pose) => animateProcedural(rig, pose.phase, pose.stride, pose.aimPitch - pose.flinch * .35, pose.time, pose.crouch),
+    animateDeath: (t) => {
+      const k = Math.min(1, t / .55);
+      rig.root.rotation.x = -k * k * Math.PI / 2 * .96;
+      rig.pelvis.position.y = rig.hipHeight * (1 - k * .75);
+    },
+    pieces: () => rig.meshes.slice(),
+  };
 }
 
 /** Procedural animation: walk cycle blended with an aiming upper body. */
-export function animateRig(rig: Rig, phase: number, stride: number, aimPitch: number, time: number, crouch = 0): void {
+function animateProcedural(rig: ProceduralRig, phase: number, stride: number, aimPitch: number, time: number, crouch = 0): void {
   const swing = Math.sin(phase) * .55 * stride;
   rig.hips[0].rotation.x = swing - crouch * .9;
   rig.hips[1].rotation.x = -swing - crouch * .9;
@@ -293,7 +372,7 @@ const DOWN = new THREE.Vector3(0, -1, 0);
  * Two-bone IK in spine space: rotations for shoulder and elbow joints (whose limbs hang along -Y)
  * that place each hand on `targets` ([left, right]), elbows bending down and outward.
  */
-function armPose(shoulders: THREE.Group[], targets: [THREE.Vector3, THREE.Vector3], upper: number, lower: number): Rig["armPose"] {
+function armPose(shoulders: THREE.Group[], targets: [THREE.Vector3, THREE.Vector3], upper: number, lower: number): ProceduralRig["armPose"] {
   const shoulderQ: THREE.Quaternion[] = [], elbowQ: THREE.Quaternion[] = [];
   shoulders.forEach((shoulder, i) => {
     const side = i === 0 ? -1 : 1;

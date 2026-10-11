@@ -68,7 +68,9 @@ Build the production version with `pnpm build`. Add `?test` to the URL to skip t
 | `src/reflections.ts` | Wet-deck planar reflections |
 | `src/postfx.ts` | Depth-aware post: volumetric light, ambient occlusion, composite + ADS blur |
 | `src/envprobe.ts` | Dynamic environment reflections captured around the player |
-| `src/actors.ts` | Droid and clone models and procedural animation |
+| `src/actors.ts` | Rig interface the AI drives; procedural fallback droids and clones; weapon models |
+| `src/characters.ts` | Animated clone / B1 / B2 from the loaded models: clip blending, rifle IK, hit proxies, shatter pieces |
+| `src/retarget.ts` | Bakes animation-library clips onto other skeletons |
 | `src/vehicles.ts` | Gunship, vulture and lander: loaded models placed with lights and gun anchors, procedural fallbacks |
 | `src/models.ts` | glTF loading (meshopt, WebP) behind the loading screen; fitting models to the game's scale |
 | `src/weapon.ts` | First-person DC-15A |
@@ -80,13 +82,17 @@ Build the production version with `pnpm build`. Add `?test` to the URL to skip t
 
 ## Credits
 
-Third-party models, all used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). They were compressed, rescaled and in some cases re-textured for the game.
+Third-party models, used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) unless noted. They were compressed, rescaled and in some cases re-textured for the game.
 
 | Asset | Author | Source |
 | --- | --- | --- |
 | LAAT/i Gunship | A308 Digital | [Sketchfab](https://sketchfab.com/3d-models/laati-gunship-74dcce4616614706a5a14cc18f9e051f) |
 | Vulture Droid | DrEgguin | [Sketchfab](https://sketchfab.com/3d-models/vulture-droid-5542f951834e4032b229ebdee12d3310) |
 | C-9979 landing craft (re-textured) | bruhepic925 | [Sketchfab](https://sketchfab.com/3d-models/c-9979-landing-craft-65850006f9d14e36b2a416c026c3b74b) |
+| Clone Trooper Phase1 (Shiny) [Updated] (skin binding repaired) | Admiral Tributon | [Sketchfab](https://sketchfab.com/3d-models/clone-trooper-phase1-shiny-updated-aae018747b054186bd48e460b0ad1192) |
+| Battle Droid B1 | Andrés Kuiper | [Sketchfab](https://sketchfab.com/3d-models/battle-droid-b1-3ee39289d86a45cd894f61e269ea10ed) |
+| Super Battle Droid B2 Animated (based on Andrés Kuiper's B2) | Suvalien | [Sketchfab](https://sketchfab.com/3d-models/super-battle-droid-b2-animated-training-a0f947934672450bad323d6438499812) |
+| Universal Animation Library (CC0, retargeted onto the clone and B1) | Quaternius | [quaternius.com](https://quaternius.com/packs/universalanimationlibrary.html) |
 
 ## Project status
 
