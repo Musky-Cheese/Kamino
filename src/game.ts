@@ -1,5 +1,10 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
 const PLAYER_HEIGHT = 1.72;
 const MAGAZINE_SIZE = 20;
@@ -24,11 +29,13 @@ type Ally = {
 
 type Tracer = { line: THREE.Line; ttl: number };
 type Spark = { mesh: THREE.Mesh; velocity: THREE.Vector3; ttl: number };
+type MistSheet = { mesh: THREE.Mesh; speed: number; startX: number };
 
 export class KaminoGame {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.05, 180);
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+  private readonly composer: EffectComposer;
   private readonly controls: PointerLockControls;
   private readonly timer = new THREE.Timer();
   private readonly raycaster = new THREE.Raycaster();
@@ -39,9 +46,16 @@ export class KaminoGame {
   private readonly allies: Ally[] = [];
   private readonly tracers: Tracer[] = [];
   private readonly sparks: Spark[] = [];
-  private readonly rain: THREE.Points;
+  private readonly rain: THREE.LineSegments;
+  private readonly mistSheets: MistSheet[] = [];
+  private readonly animatedMaterials: THREE.ShaderMaterial[] = [];
+  private ocean?: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   private readonly weapon = new THREE.Group();
-  private readonly muzzleLight = new THREE.PointLight(0x61cfff, 0, 4);
+  private readonly muzzleLight = new THREE.PointLight(0x61cfff, 0, 6, 2);
+  private readonly muzzleFlash = new THREE.Mesh(
+    new THREE.ConeGeometry(.11, .65, 9, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xc9f5ff, transparent: true, opacity: .92, blending: THREE.AdditiveBlending, depthWrite: false }),
+  );
   private started = false;
   private ended = false;
   private firing = false;
@@ -60,7 +74,9 @@ export class KaminoGame {
   private nextEnemyId = 0;
   private bobTime = 0;
   private audio?: AudioContext;
+  private ambientStarted = false;
   private readonly stormLight = new THREE.DirectionalLight(0xb9e7ff, 1.2);
+  private readonly lightningFill = new THREE.PointLight(0xc8efff, 0, 95, 1.3);
 
   private readonly menu = document.querySelector<HTMLElement>("#menu")!;
   private readonly hud = document.querySelector<HTMLElement>("#hud")!;
@@ -79,17 +95,18 @@ export class KaminoGame {
     this.renderer.setSize(innerWidth, innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = .92;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.root.prepend(this.renderer.domElement);
     this.controls = new PointerLockControls(this.camera, this.renderer.domElement);
     this.rain = this.createRain();
+    this.composer = this.createPostProcessing();
   }
 
   initialize(): void {
-    this.scene.background = new THREE.Color(0x07131d);
-    this.scene.fog = new THREE.FogExp2(0x0a1d28, 0.023);
+    this.scene.background = new THREE.Color(0x030b12);
+    this.scene.fog = new THREE.FogExp2(0x091a24, 0.017);
     this.camera.position.set(0, PLAYER_HEIGHT, 25);
     this.camera.rotation.order = "YXZ";
     this.buildLighting();
@@ -102,32 +119,55 @@ export class KaminoGame {
     this.renderer.setAnimationLoop(() => this.animate());
   }
 
+  private createPostProcessing(): EffectComposer {
+    const composer = new EffectComposer(this.renderer);
+    composer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+    composer.addPass(new RenderPass(this.scene, this.camera));
+
+    const gtao = new GTAOPass(this.scene, this.camera, innerWidth, innerHeight);
+    gtao.blendIntensity = .78;
+    gtao.pdSamples = 8;
+    gtao.pdRings = 2;
+    composer.addPass(gtao);
+
+    const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .32, .55, 1.15);
+    composer.addPass(bloom);
+    composer.addPass(new OutputPass());
+    return composer;
+  }
+
   private buildLighting(): void {
-    this.scene.add(new THREE.HemisphereLight(0x9bd8ed, 0x071015, 1.7));
+    this.scene.add(new THREE.HemisphereLight(0x82b8cb, 0x020609, .8));
     this.stormLight.position.set(-18, 28, 14);
     this.stormLight.castShadow = true;
-    this.stormLight.shadow.mapSize.set(1024, 1024);
+    this.stormLight.shadow.mapSize.set(2048, 2048);
+    this.stormLight.shadow.bias = -.0003;
+    this.stormLight.shadow.normalBias = .035;
     this.stormLight.shadow.camera.left = -32;
     this.stormLight.shadow.camera.right = 32;
     this.stormLight.shadow.camera.top = 32;
     this.stormLight.shadow.camera.bottom = -32;
     this.scene.add(this.stormLight);
+    this.lightningFill.position.set(-7, 18, -18);
+    this.scene.add(this.lightningFill);
   }
 
   private buildWorld(): void {
-    const metal = new THREE.MeshStandardMaterial({ color: 0x66818e, metalness: 0.72, roughness: 0.36 });
-    const darkMetal = new THREE.MeshStandardMaterial({ color: 0x263c47, metalness: 0.8, roughness: 0.3 });
-    const floor = new THREE.MeshStandardMaterial({ color: 0x566e78, metalness: 0.62, roughness: 0.44 });
-    const glass = new THREE.MeshStandardMaterial({ color: 0x70c8ea, transparent: true, opacity: 0.18, metalness: 0.45, roughness: 0.1 });
-    const glow = new THREE.MeshBasicMaterial({ color: 0x67dcff });
+    const deckTexture = new THREE.TextureLoader().load("./textures/wet-deck-panels.jpg");
+    deckTexture.colorSpace = THREE.SRGBColorSpace;
+    deckTexture.wrapS = deckTexture.wrapT = THREE.RepeatWrapping;
+    deckTexture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    deckTexture.repeat.set(2.6, 2.2);
 
-    const ocean = new THREE.Mesh(
-      new THREE.PlaneGeometry(260, 260, 40, 40),
-      new THREE.MeshStandardMaterial({ color: 0x04131e, metalness: 0.1, roughness: 0.22 }),
-    );
-    ocean.rotation.x = -Math.PI / 2;
-    ocean.position.y = -3.3;
-    this.scene.add(ocean);
+    const metal = new THREE.MeshPhysicalMaterial({ color: 0x6e8791, metalness: .78, roughness: .28, clearcoat: .42, clearcoatRoughness: .16 });
+    const darkMetal = new THREE.MeshPhysicalMaterial({ color: 0x1a2d37, metalness: .86, roughness: .25, clearcoat: .28, clearcoatRoughness: .2 });
+    const floor = new THREE.MeshPhysicalMaterial({ map: deckTexture, color: 0x718a95, metalness: .68, roughness: .25, clearcoat: .72, clearcoatRoughness: .12 });
+    const glass = new THREE.MeshPhysicalMaterial({ color: 0x70c8ea, transparent: true, opacity: .2, metalness: .15, roughness: .06, transmission: .28, thickness: .08 });
+    const glow = new THREE.MeshStandardMaterial({ color: 0x123a49, emissive: 0x67dcff, emissiveIntensity: 3.8, toneMapped: true });
+
+    this.buildStormSky();
+    this.ocean = this.buildOcean();
+    this.scene.add(this.ocean);
 
     this.addBox(0, -0.35, -1, 31, 0.7, 26, floor);
     // Exterior rails and platform ribs.
@@ -230,15 +270,160 @@ export class KaminoGame {
       this.scene.add(tower);
     }
 
+    this.buildWeatherLayers();
+    this.buildSetDressing(metal, darkMetal, glow);
     this.scene.add(this.rain);
   }
 
+  private buildStormSky(): void {
+    const material = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      uniforms: { time: { value: 0 }, flash: { value: 0 } },
+      vertexShader: `
+        varying vec3 vPosition;
+        void main() {
+          vPosition = position;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vPosition;
+        uniform float time;
+        uniform float flash;
+        float clouds(vec3 p) {
+          float n = sin(p.x * .055 + time * .035) * sin(p.z * .046 - time * .025);
+          n += .55 * sin((p.x + p.z) * .09 + time * .05);
+          n += .28 * sin(p.x * .17 - p.z * .13);
+          return n;
+        }
+        void main() {
+          vec3 d = normalize(vPosition);
+          float horizon = pow(1.0 - max(d.y, 0.0), 2.2);
+          float cloud = smoothstep(-.25, 1.05, clouds(vPosition));
+          vec3 zenith = vec3(.012, .035, .052);
+          vec3 horizonColor = vec3(.075, .16, .205);
+          vec3 color = mix(zenith, horizonColor, horizon);
+          color *= mix(1.0, .52, cloud);
+          color += vec3(.45, .72, .9) * flash * (.22 + horizon * .3);
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `,
+    });
+    this.animatedMaterials.push(material);
+    this.scene.add(new THREE.Mesh(new THREE.SphereGeometry(145, 40, 22), material));
+  }
+
+  private buildOcean(): THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial> {
+    const material = new THREE.ShaderMaterial({
+      uniforms: { time: { value: 0 }, flash: { value: 0 } },
+      vertexShader: `
+        uniform float time;
+        varying float vWave;
+        varying vec3 vWorld;
+        void main() {
+          vec3 p = position;
+          float a = sin(p.x * .17 + time * 1.55) * .34;
+          float b = sin(p.y * .12 - time * 1.15 + p.x * .035) * .28;
+          float c = sin((p.x + p.y) * .28 + time * 2.05) * .08;
+          p.z += a + b + c;
+          vWave = a + b + c;
+          vec4 world = modelMatrix * vec4(p, 1.0);
+          vWorld = world.xyz;
+          gl_Position = projectionMatrix * viewMatrix * world;
+        }
+      `,
+      fragmentShader: `
+        uniform float time;
+        uniform float flash;
+        varying float vWave;
+        varying vec3 vWorld;
+        void main() {
+          vec3 dx = dFdx(vWorld);
+          vec3 dy = dFdy(vWorld);
+          vec3 normal = normalize(cross(dx, dy));
+          vec3 viewDir = normalize(cameraPosition - vWorld);
+          float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 3.0);
+          float foam = smoothstep(.43, .62, vWave + sin(vWorld.x * .7 + time) * .08);
+          vec3 deep = vec3(.004, .026, .043);
+          vec3 reflected = vec3(.12, .27, .36);
+          vec3 color = mix(deep, reflected, fresnel * .82);
+          color += foam * vec3(.17, .3, .34);
+          color += flash * vec3(.22, .42, .55);
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `,
+    });
+    this.animatedMaterials.push(material);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(260, 260, 110, 110), material);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = -3.3;
+    return mesh;
+  }
+
+  private buildWeatherLayers(): void {
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 32;
+    const context = canvas.getContext("2d")!;
+    const gradient = context.createLinearGradient(0, 0, 128, 0);
+    gradient.addColorStop(0, "rgba(160,220,236,0)");
+    gradient.addColorStop(.5, "rgba(160,220,236,.25)");
+    gradient.addColorStop(1, "rgba(160,220,236,0)");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 128, 32);
+    const texture = new THREE.CanvasTexture(canvas);
+
+    for (let i = 0; i < 7; i++) {
+      const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: .1 + Math.random() * .08, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(24 + Math.random() * 16, 2.2 + Math.random() * 2.5), material);
+      mesh.position.set(-24 + Math.random() * 30, .25 + Math.random() * 2.5, -8 - Math.random() * 48);
+      mesh.rotation.y = -.08 + Math.random() * .16;
+      this.scene.add(mesh);
+      this.mistSheets.push({ mesh, speed: .75 + Math.random() * 1.2, startX: mesh.position.x });
+    }
+  }
+
+  private buildSetDressing(metal: THREE.Material, darkMetal: THREE.Material, glow: THREE.Material): void {
+    const wet = new THREE.MeshPhysicalMaterial({ color: 0x102e3b, metalness: .2, roughness: .06, clearcoat: 1, clearcoatRoughness: .035, transparent: true, opacity: .72 });
+    const puddles: Array<[number, number, number, number]> = [
+      [-8.4, 1.8, 2.4, .9], [7.8, -3.8, 2.8, .75], [-3.5, -8.7, 1.9, .62], [2.2, 16.5, 1.5, .45],
+    ];
+    for (const [x, z, sx, sz] of puddles) {
+      const puddle = new THREE.Mesh(new THREE.CircleGeometry(1, 40), wet);
+      puddle.rotation.x = -Math.PI / 2;
+      puddle.scale.set(sx, sz, 1);
+      puddle.position.set(x, .016, z);
+      this.scene.add(puddle);
+    }
+
+    // Repeated supports, conduits and small lights create close-range scale cues.
+    for (let x = -14; x <= 14; x += 2) {
+      const support = new THREE.Mesh(new THREE.CylinderGeometry(.055, .09, .82, 8), darkMetal);
+      support.position.set(x, .42, -13.55);
+      support.castShadow = true;
+      this.scene.add(support);
+      if (x % 4 === 0) {
+        const lamp = new THREE.Mesh(new THREE.BoxGeometry(.18, .05, .08), glow);
+        lamp.position.set(x, .92, -13.48);
+        this.scene.add(lamp);
+      }
+    }
+    for (const side of [-1, 1]) {
+      const pipe = new THREE.Mesh(new THREE.TorusGeometry(12.8, .055, 6, 72, Math.PI * .72), metal);
+      pipe.rotation.x = Math.PI / 2;
+      pipe.rotation.z = side < 0 ? .42 : Math.PI + .42;
+      pipe.position.set(0, .28, -1);
+      this.scene.add(pipe);
+    }
+  }
+
   private buildStartingArea(
-    metal: THREE.MeshStandardMaterial,
-    darkMetal: THREE.MeshStandardMaterial,
-    floor: THREE.MeshStandardMaterial,
-    glass: THREE.MeshStandardMaterial,
-    glow: THREE.MeshBasicMaterial,
+    metal: THREE.MeshPhysicalMaterial,
+    darkMetal: THREE.MeshPhysicalMaterial,
+    floor: THREE.MeshPhysicalMaterial,
+    glass: THREE.MeshPhysicalMaterial,
+    glow: THREE.MeshStandardMaterial,
   ): void {
     const whiteShell = new THREE.MeshStandardMaterial({ color: 0xaabcc3, metalness: .58, roughness: .3 });
     const inset = new THREE.MeshStandardMaterial({ color: 0x101e27, metalness: .82, roughness: .28 });
@@ -347,38 +532,74 @@ export class KaminoGame {
     return mesh;
   }
 
-  private createRain(): THREE.Points {
-    const count = 2600;
-    const positions = new Float32Array(count * 3);
+  private createRain(): THREE.LineSegments {
+    const count = 1900;
+    const positions = new Float32Array(count * 2 * 3);
     for (let i = 0; i < count; i++) {
-      positions[i * 3] = (Math.random() - .5) * 90;
-      positions[i * 3 + 1] = Math.random() * 35;
-      positions[i * 3 + 2] = (Math.random() - .5) * 95;
+      const offset = i * 6;
+      const x = (Math.random() - .5) * 90;
+      const y = Math.random() * 35;
+      const z = (Math.random() - .5) * 95;
+      const length = .38 + Math.random() * 1.15;
+      positions[offset] = x;
+      positions[offset + 1] = y;
+      positions[offset + 2] = z;
+      positions[offset + 3] = x - length * .13;
+      positions[offset + 4] = y - length;
+      positions[offset + 5] = z;
     }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    return new THREE.Points(geometry, new THREE.PointsMaterial({ color: 0xa8e4ff, size: .045, transparent: true, opacity: .55 }));
+    const material = new THREE.LineBasicMaterial({ color: 0xb8e9f6, transparent: true, opacity: .27, depthWrite: false, blending: THREE.AdditiveBlending });
+    return new THREE.LineSegments(geometry, material);
   }
 
   private buildWeapon(): void {
-    const black = new THREE.MeshStandardMaterial({ color: 0x0d151b, metalness: .9, roughness: .22 });
-    const steel = new THREE.MeshStandardMaterial({ color: 0x354956, metalness: .9, roughness: .2 });
-    const blue = new THREE.MeshBasicMaterial({ color: 0x56cfff });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(.16, .17, .72), black);
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(.035, .035, .58, 10), steel);
+    const black = new THREE.MeshPhysicalMaterial({ color: 0x080e13, metalness: .92, roughness: .19, clearcoat: .35, clearcoatRoughness: .16 });
+    const steel = new THREE.MeshPhysicalMaterial({ color: 0x354956, metalness: .95, roughness: .16, clearcoat: .2 });
+    const gripMaterial = new THREE.MeshStandardMaterial({ color: 0x111a20, metalness: .25, roughness: .68 });
+    const blue = new THREE.MeshStandardMaterial({ color: 0x163f52, emissive: 0x56cfff, emissiveIntensity: 5 });
+    const glove = new THREE.MeshStandardMaterial({ color: 0x10171b, roughness: .75, metalness: .08 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(.19, .2, .76, 2, 2, 4), black);
+    const upperHousing = new THREE.Mesh(new THREE.BoxGeometry(.13, .09, .48), steel);
+    upperHousing.position.set(0, .125, -.08);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(.04, .052, .62, 14), steel);
     barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, .025, -.58);
-    const stock = new THREE.Mesh(new THREE.BoxGeometry(.14, .13, .28), steel);
-    stock.position.set(0, -.02, .4);
-    const sight = new THREE.Mesh(new THREE.BoxGeometry(.055, .07, .19), blue);
-    sight.position.set(0, .13, -.08);
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(.1, .3, .13), black);
+    barrel.position.set(0, .025, -.65);
+    const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(.065, .048, .16, 14), black);
+    muzzle.rotation.x = Math.PI / 2;
+    muzzle.position.set(0, .025, -.98);
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(.17, .145, .34), steel);
+    stock.position.set(0, -.015, .49);
+    const sight = new THREE.Mesh(new THREE.BoxGeometry(.06, .075, .2), blue);
+    sight.position.set(0, .18, -.08);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(.115, .32, .15), gripMaterial);
     grip.position.set(0, -.2, .15);
     grip.rotation.x = -.22;
-    this.muzzleLight.position.set(0, .02, -.9);
-    this.weapon.add(body, barrel, stock, sight, grip, this.muzzleLight);
-    this.weapon.position.set(.38, -.33, -.7);
+    for (const x of [-.075, .075]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(.025, .035, .62), steel);
+      rail.position.set(x, -.04, -.12);
+      this.weapon.add(rail);
+    }
+    for (let z = -.44; z <= .16; z += .13) {
+      const vent = new THREE.Mesh(new THREE.BoxGeometry(.205, .025, .045), gripMaterial);
+      vent.position.set(0, .04, z);
+      this.weapon.add(vent);
+    }
+    const rightHand = new THREE.Mesh(new THREE.SphereGeometry(.12, 12, 8), glove);
+    rightHand.scale.set(.72, 1.15, .8);
+    rightHand.position.set(.02, -.34, .18);
+    const leftHand = rightHand.clone();
+    leftHand.position.set(-.04, -.13, -.4);
+    leftHand.rotation.x = .75;
+    this.muzzleLight.position.set(0, .025, -1.08);
+    this.muzzleFlash.position.set(0, .025, -1.35);
+    this.muzzleFlash.rotation.x = -Math.PI / 2;
+    this.muzzleFlash.visible = false;
+    this.weapon.add(body, upperHousing, barrel, muzzle, stock, sight, grip, rightHand, leftHand, this.muzzleLight, this.muzzleFlash);
+    this.weapon.position.set(.38, -.34, -.72);
     this.weapon.rotation.set(-.08, -.09, 0);
+    this.weapon.traverse((child) => { if (child instanceof THREE.Mesh) child.castShadow = true; });
     this.camera.add(this.weapon);
     this.scene.add(this.camera);
   }
@@ -528,6 +749,7 @@ export class KaminoGame {
       this.camera.aspect = innerWidth / innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(innerWidth, innerHeight);
+      this.composer.setSize(innerWidth, innerHeight);
     });
   }
 
@@ -544,7 +766,7 @@ export class KaminoGame {
     this.updateTracers(delta);
     this.updateSparks(delta);
     this.updateWeapon(delta);
-    this.renderer.render(this.scene, this.camera);
+    this.composer.render(delta);
   }
 
   private updatePlayer(delta: number): void {
@@ -585,8 +807,11 @@ export class KaminoGame {
     this.nextShot = now + 165;
     this.ammo--;
     this.weaponKick = 1;
-    this.muzzleLight.intensity = 4;
-    this.playTone(920, 150, "sawtooth", .045, 210);
+    this.muzzleLight.intensity = 42;
+    this.muzzleFlash.visible = true;
+    this.muzzleFlash.rotation.z = Math.random() * Math.PI;
+    this.muzzleFlash.scale.setScalar(.7 + Math.random() * .55);
+    this.playBlaster();
     this.updateHud();
 
     this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
@@ -598,8 +823,9 @@ export class KaminoGame {
     const origin = new THREE.Vector3();
     this.muzzleLight.getWorldPosition(origin);
     this.addTracer(origin, destination, 0x55d9ff, .08);
-
     const enemyId = first?.object.userData.enemyId as number | undefined;
+    if (first && enemyId === undefined) this.spawnSparks(destination, 0x8de8ff, 4);
+
     if (enemyId !== undefined) {
       const enemy = this.enemies[enemyId];
       if (enemy?.alive) {
@@ -774,9 +1000,9 @@ export class KaminoGame {
     }
   }
 
-  private spawnSparks(origin: THREE.Vector3, color: number): void {
+  private spawnSparks(origin: THREE.Vector3, color: number, count = 12): void {
     const material = new THREE.MeshBasicMaterial({ color });
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < count; i++) {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(.025, .025, .18), material.clone());
       mesh.position.copy(origin);
       mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
@@ -807,14 +1033,20 @@ export class KaminoGame {
 
   private updateAtmosphere(delta: number): void {
     const positions = this.rain.geometry.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < positions.count; i++) {
-      let y = positions.getY(i) - delta * 22;
-      if (y < -2.5) y = 30;
-      positions.setY(i, y);
-      positions.setX(i, positions.getX(i) - delta * 2.2);
-      if (positions.getX(i) < -45) positions.setX(i, 45);
+    for (let i = 0; i < positions.count; i += 2) {
+      let topY = positions.getY(i) - delta * 25;
+      let x = positions.getX(i) - delta * 3.2;
+      const length = Math.max(.4, positions.getY(i) - positions.getY(i + 1));
+      if (topY < -2.5) topY = 31 + Math.random() * 5;
+      if (x < -45) x = 45;
+      positions.setXYZ(i, x, topY, positions.getZ(i));
+      positions.setXYZ(i + 1, x - length * .13, topY - length, positions.getZ(i + 1));
     }
     positions.needsUpdate = true;
+    for (const mist of this.mistSheets) {
+      mist.mesh.position.x += mist.speed * delta;
+      if (mist.mesh.position.x > 28) mist.mesh.position.x = mist.startX - 18;
+    }
     this.lightningTimer -= delta;
     if (this.lightningTimer <= 0) {
       this.lightningStrength = 4.5;
@@ -822,7 +1054,12 @@ export class KaminoGame {
       this.playTone(48, 480, "sine", .05, 31);
     }
     this.lightningStrength = Math.max(0, this.lightningStrength - delta * 18);
-    this.stormLight.intensity = 1.2 + this.lightningStrength;
+    this.stormLight.intensity = 1.05 + this.lightningStrength;
+    this.lightningFill.intensity = this.lightningStrength * 42;
+    for (const material of this.animatedMaterials) {
+      material.uniforms.time.value += delta;
+      material.uniforms.flash.value = this.lightningStrength * .16;
+    }
     if (this.messageTimer > 0) {
       this.messageTimer -= delta;
       if (this.messageTimer <= 0) this.message.classList.remove("show");
@@ -837,11 +1074,58 @@ export class KaminoGame {
     this.weapon.position.y = THREE.MathUtils.lerp(this.weapon.position.y, -.33 + Math.abs(sway) * .7, delta * 9);
     this.weapon.rotation.x = -.08 + this.weaponKick * .08;
     this.muzzleLight.intensity = Math.max(0, this.muzzleLight.intensity - delta * 35);
+    this.muzzleFlash.visible = this.muzzleLight.intensity > 15;
   }
 
   private initializeAudio(): void {
     if (!this.audio) this.audio = new AudioContext();
     if (this.audio.state === "suspended") void this.audio.resume();
+    if (!this.ambientStarted) this.startStormAudio();
+  }
+
+  private startStormAudio(): void {
+    if (!this.audio) return;
+    this.ambientStarted = true;
+    const length = this.audio.sampleRate * 3;
+    const buffer = this.audio.createBuffer(1, length, this.audio.sampleRate);
+    const data = buffer.getChannelData(0);
+    let brown = 0;
+    for (let i = 0; i < length; i++) {
+      const white = Math.random() * 2 - 1;
+      brown = (brown + .018 * white) / 1.018;
+      data[i] = brown * 3.2 + white * .08;
+    }
+    const source = this.audio.createBufferSource();
+    const rainFilter = this.audio.createBiquadFilter();
+    const rainGain = this.audio.createGain();
+    source.buffer = buffer;
+    source.loop = true;
+    rainFilter.type = "bandpass";
+    rainFilter.frequency.value = 1350;
+    rainFilter.Q.value = .32;
+    rainGain.gain.value = .075;
+    source.connect(rainFilter).connect(rainGain).connect(this.audio.destination);
+    source.start();
+  }
+
+  private playBlaster(): void {
+    this.playTone(1160, 75, "sawtooth", .04, 260);
+    this.playTone(420, 145, "square", .018, 95);
+    if (!this.audio || this.audio.state !== "running") return;
+    const duration = .065;
+    const buffer = this.audio.createBuffer(1, Math.floor(this.audio.sampleRate * duration), this.audio.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+    const source = this.audio.createBufferSource();
+    const filter = this.audio.createBiquadFilter();
+    const gain = this.audio.createGain();
+    filter.type = "bandpass";
+    filter.frequency.value = 1900;
+    filter.Q.value = .8;
+    gain.gain.value = .032;
+    source.buffer = buffer;
+    source.connect(filter).connect(gain).connect(this.audio.destination);
+    source.start();
   }
 
   private playTone(startFrequency: number, durationMs: number, type: OscillatorType, volume: number, endFrequency: number): void {
