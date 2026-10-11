@@ -7,4 +7,5 @@ dist-server/
 *.log
 .DS_Store
 Thumbs.db
+.chrome-visual-qa/
 

@@ -130,8 +130,6 @@ export class KaminoGame {
     this.scene.add(ocean);
 
     this.addBox(0, -0.35, -1, 31, 0.7, 26, floor);
-    this.addBox(0, -0.3, 21, 7.4, 0.6, 18.5, floor);
-
     // Exterior rails and platform ribs.
     this.addBox(0, 0.48, -13.8, 31, 1.05, 0.2, metal);
     this.addBox(0, 0.48, 11.9, 31, 1.05, 0.2, metal);
@@ -141,17 +139,7 @@ export class KaminoGame {
       this.addBox(x, 0.02, -1, 0.08, 0.08, 25, darkMetal);
     }
 
-    // Entry corridor with window strips and luminous ceiling ribs.
-    this.addBox(-3.75, 2.1, 21, 0.38, 4.8, 18.5, metal);
-    this.addBox(3.75, 2.1, 21, 0.38, 4.8, 18.5, metal);
-    this.addBox(0, 4.35, 21, 7.5, 0.3, 18.5, darkMetal);
-    this.addBox(-3.53, 2.1, 21, 0.05, 2.1, 15.5, glass);
-    this.addBox(3.53, 2.1, 21, 0.05, 2.1, 15.5, glass);
-    for (let z = 13; z <= 29; z += 2.1) {
-      this.addBox(0, 4.1, z, 6.9, 0.07, 0.12, glow, false);
-    }
-    this.addBox(-2.65, 2.2, 12, 1.65, 4.5, 0.55, darkMetal);
-    this.addBox(2.65, 2.2, 12, 1.65, 4.5, 0.55, darkMetal);
+    this.buildStartingArea(metal, darkMetal, floor, glass, glow);
 
     // Radial courtyard forms inspired by Tipoca City's layered landing plazas.
     const courtyard = new THREE.Group();
@@ -243,6 +231,110 @@ export class KaminoGame {
     }
 
     this.scene.add(this.rain);
+  }
+
+  private buildStartingArea(
+    metal: THREE.MeshStandardMaterial,
+    darkMetal: THREE.MeshStandardMaterial,
+    floor: THREE.MeshStandardMaterial,
+    glass: THREE.MeshStandardMaterial,
+    glow: THREE.MeshBasicMaterial,
+  ): void {
+    const whiteShell = new THREE.MeshStandardMaterial({ color: 0xaabcc3, metalness: .58, roughness: .3 });
+    const inset = new THREE.MeshStandardMaterial({ color: 0x101e27, metalness: .82, roughness: .28 });
+    const warning = new THREE.MeshBasicMaterial({ color: 0xffa34b });
+    const screen = new THREE.MeshBasicMaterial({ color: 0x7ce8ff });
+    const deepGlass = glass.clone();
+    deepGlass.color.setHex(0x2d8cab);
+    deepGlass.opacity = .26;
+
+    // The spawn corridor shell and its long storm-facing windows.
+    this.addBox(0, -.3, 21, 7.4, .6, 18.5, floor);
+    this.addBox(-3.75, 2.1, 21, .38, 4.8, 18.5, metal);
+    this.addBox(3.75, 2.1, 21, .38, 4.8, 18.5, metal);
+    this.addBox(0, 4.35, 21, 7.5, .3, 18.5, darkMetal);
+    this.addBox(-3.53, 2.28, 21, .05, 2.45, 15.5, deepGlass, false);
+    this.addBox(3.53, 2.28, 21, .05, 2.45, 15.5, deepGlass, false);
+
+    // Repeating ribs give the opening view depth and a recognisable Kaminoan silhouette.
+    for (let z = 13.2; z <= 29.1; z += 2.65) {
+      this.addBox(-3.43, 2.35, z, .24, 4.2, .22, whiteShell);
+      this.addBox(3.43, 2.35, z, .24, 4.2, .22, whiteShell);
+      this.addBox(0, 4.08, z, 6.65, .12, .2, glow, false);
+
+      const leftShoulder = this.addBox(-2.91, 3.67, z, .18, 1.55, .23, whiteShell);
+      leftShoulder.rotation.z = -.72;
+      const rightShoulder = this.addBox(2.91, 3.67, z, .18, 1.55, .23, whiteShell);
+      rightShoulder.rotation.z = .72;
+    }
+
+    // Layered deck plates, illuminated seams, and a central path pull the player forward.
+    for (let z = 13.5; z <= 29; z += 2.25) {
+      this.addBox(0, .035, z, 5.7, .05, 1.82, inset);
+      this.addBox(-2.98, .08, z, .07, .045, 1.72, glow, false);
+      this.addBox(2.98, .08, z, .07, .045, 1.72, glow, false);
+    }
+    this.addBox(0, .075, 21.1, .055, .05, 16.7, glow, false);
+    for (let z = 14.1; z <= 28.2; z += 2.25) {
+      this.addBox(-1.15, .08, z, .5, .055, .055, whiteShell, false);
+      this.addBox(1.15, .08, z, .5, .055, .055, whiteShell, false);
+    }
+
+    // Window mullions and lower service panels add close-range parallax at spawn.
+    for (const side of [-1, 1]) {
+      const x = side * 3.49;
+      this.addBox(x, .72, 21, .12, 1.15, 16.4, inset);
+      this.addBox(x, 3.58, 21, .12, .4, 16.4, darkMetal);
+      for (let z = 14.1; z <= 28.2; z += 2.65) {
+        this.addBox(x, 2.28, z, .14, 2.5, .1, metal);
+      }
+    }
+
+    // A segmented pressure door closes the dead space behind the player.
+    this.addBox(0, 2.1, 30.15, 7.2, 4.5, .42, darkMetal);
+    this.addBox(0, 2.12, 29.91, 6.25, 3.75, .08, whiteShell);
+    this.addBox(0, 2.12, 29.84, .2, 3.55, .08, inset);
+    for (const x of [-2.75, -1.4, 1.4, 2.75]) this.addBox(x, 2.12, 29.82, .1, 3.45, .08, inset);
+    this.addBox(0, .52, 29.76, 5.9, .09, .09, warning, false);
+    this.addBox(0, 3.72, 29.76, 5.9, .08, .09, glow, false);
+
+    // A compact tactical console beside the spawn point makes the space feel occupied.
+    const consoleGroup = new THREE.Group();
+    const pedestal = new THREE.Mesh(new THREE.BoxGeometry(.78, 1.02, .58), inset);
+    pedestal.position.y = .51;
+    const consoleTop = new THREE.Mesh(new THREE.BoxGeometry(1.02, .13, .72), whiteShell);
+    consoleTop.position.set(0, 1.08, -.06);
+    consoleTop.rotation.x = -.18;
+    const display = new THREE.Mesh(new THREE.PlaneGeometry(.68, .34), screen);
+    display.position.set(0, 1.18, -.425);
+    display.rotation.x = -.18;
+    const scanLine = new THREE.Mesh(new THREE.BoxGeometry(.48, .025, .015), glow);
+    scanLine.position.set(0, 1.19, -.438);
+    consoleGroup.add(pedestal, consoleTop, display, scanLine);
+    consoleGroup.position.set(2.66, 0, 25.2);
+    consoleGroup.rotation.y = -.15;
+    this.scene.add(consoleGroup);
+    this.shootSurfaces.push(pedestal, consoleTop);
+    this.blockers.push(new THREE.Box2(new THREE.Vector2(2.05, 24.62), new THREE.Vector2(3.22, 25.78)));
+
+    // The threshold frames the courtyard reveal and changes from cool interior light to storm light.
+    this.addBox(-2.78, 2.2, 12, 1.4, 4.5, .65, darkMetal);
+    this.addBox(2.78, 2.2, 12, 1.4, 4.5, .65, darkMetal);
+    this.addBox(-1.98, 3.42, 12, .3, 2.55, .72, whiteShell).rotation.z = -.58;
+    this.addBox(1.98, 3.42, 12, .3, 2.55, .72, whiteShell).rotation.z = .58;
+    this.addBox(0, 4.16, 12, 3.6, .24, .72, whiteShell);
+    this.addBox(0, 3.93, 11.62, 3.25, .07, .09, warning, false);
+    this.addBox(0, .1, 11.72, 5.2, .08, .16, warning, false);
+
+    // Pools of cool light keep the starting area legible without flattening the storm beyond it.
+    for (const z of [16, 22, 27.6]) {
+      const light = new THREE.PointLight(0x78dcff, 2.6, 8.5, 2);
+      light.position.set(0, 3.72, z);
+      this.scene.add(light);
+    }
+    const doorLight = new THREE.PointLight(0xff9b48, 1.7, 5.2, 2);
+    doorLight.position.set(0, 1.2, 28.9);
+    this.scene.add(doorLight);
   }
 
   private addBox(x: number, y: number, z: number, w: number, h: number, d: number, material: THREE.Material, solid = true): THREE.Mesh {
