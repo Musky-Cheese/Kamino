@@ -24,6 +24,7 @@ type ShotEvent = { shooterId: string; x1: number; y1: number; x2: number; y2: nu
 
 const menu = document.querySelector<HTMLElement>("#menu")!;
 const deployButton = document.querySelector<HTMLButtonElement>("#deploy")!;
+const practiceButton = document.querySelector<HTMLButtonElement>("#practice")!;
 const callsignInput = document.querySelector<HTMLInputElement>("#callsign")!;
 const statusText = document.querySelector<HTMLElement>("#status")!;
 const hud = document.querySelector<HTMLElement>("#hud")!;
@@ -39,6 +40,9 @@ class BattleScene extends Phaser.Scene {
   private keys?: Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
   private readonly visuals = new Map<string, Phaser.GameObjects.Container>();
   private readonly targets = new Map<string, { x: number; y: number; angle: number; alive: boolean }>();
+  private readonly practicePlayers = new Map<string, NetworkPlayer>();
+  private practiceMode = false;
+  private practiceScore = 0;
   private lastInputAt = 0;
   private rain?: Phaser.GameObjects.TileSprite;
 
@@ -83,6 +87,47 @@ class BattleScene extends Phaser.Scene {
     room.onMessage("shot", (message: ShotEvent) => this.drawShot(message));
   }
 
+  startPractice(name: string): void {
+    this.practiceMode = true;
+    this.localId = "practice-player";
+    const player: NetworkPlayer = {
+      name: name || "CT-1010",
+      team: "clones",
+      x: 190,
+      y: 400,
+      angle: 0,
+      hp: 100,
+      alive: true,
+      kills: 0,
+      deaths: 0,
+    };
+    this.practicePlayers.set(this.localId, player);
+    this.addPlayer(this.localId, player);
+    this.syncTarget(this.localId, player);
+
+    const positions = [
+      [920, 300], [1030, 390], [910, 500], [760, 255], [790, 545],
+    ];
+    positions.forEach(([x, y], index) => {
+      const bot: NetworkPlayer = {
+        name: `B1-${index + 1}`,
+        team: "droids",
+        x,
+        y,
+        angle: Math.PI,
+        hp: 100,
+        alive: true,
+        kills: 0,
+        deaths: 0,
+      };
+      const id = `practice-bot-${index}`;
+      this.practicePlayers.set(id, bot);
+      this.addPlayer(id, bot);
+      this.syncTarget(id, bot);
+    });
+    this.updatePracticeHud();
+  }
+
   update(_time: number, delta: number): void {
     if (this.rain) {
       this.rain.tilePositionX -= delta * 0.22;
@@ -99,7 +144,7 @@ class BattleScene extends Phaser.Scene {
       visual.setAlpha(target.alive ? 1 : 0.18);
     }
 
-    if (!this.room || !this.keys || !this.localId || this.time.now - this.lastInputAt < 33) return;
+    if (!this.keys || !this.localId) return;
     const local = this.visuals.get(this.localId);
     if (!local) return;
 
@@ -107,6 +152,20 @@ class BattleScene extends Phaser.Scene {
     const angle = Phaser.Math.Angle.Between(local.x, local.y, pointer.worldX, pointer.worldY);
     const x = Number(this.keys.right.isDown) - Number(this.keys.left.isDown);
     const y = Number(this.keys.down.isDown) - Number(this.keys.up.isDown);
+
+    if (this.practiceMode) {
+      const player = this.practicePlayers.get(this.localId)!;
+      const length = Math.hypot(x, y) || 1;
+      const speed = 235 * (delta / 1000);
+      player.x = Phaser.Math.Clamp(player.x + (x / length) * speed, 24, 1176);
+      player.y = Phaser.Math.Clamp(player.y + (y / length) * speed, 24, 776);
+      player.angle = angle;
+      this.syncTarget(this.localId, player);
+      this.updatePracticeBots(delta);
+      return;
+    }
+
+    if (!this.room || this.time.now - this.lastInputAt < 33) return;
     this.room.send("input", { x, y, angle });
     this.lastInputAt = this.time.now;
   }
@@ -182,12 +241,91 @@ class BattleScene extends Phaser.Scene {
   }
 
   private fire(): void {
-    if (!this.room || !this.localId) return;
+    if (!this.localId) return;
     const local = this.visuals.get(this.localId);
     if (!local) return;
     const pointer = this.input.activePointer;
     const angle = Phaser.Math.Angle.Between(local.x, local.y, pointer.worldX, pointer.worldY);
+    if (this.practiceMode) {
+      this.firePracticeShot(local.x, local.y, angle);
+      return;
+    }
+    if (!this.room) return;
     this.room.send("shoot", { angle });
+  }
+
+  private updatePracticeBots(delta: number): void {
+    const player = this.practicePlayers.get(this.localId);
+    if (!player) return;
+    let index = 0;
+    for (const [id, bot] of this.practicePlayers) {
+      if (bot.team !== "droids" || !bot.alive) continue;
+      const angle = Phaser.Math.Angle.Between(bot.x, bot.y, player.x, player.y);
+      bot.angle = angle;
+      const drift = Math.sin(this.time.now / 700 + index * 1.7) * 0.7;
+      const speed = 42 * (delta / 1000);
+      bot.x = Phaser.Math.Clamp(bot.x + Math.cos(angle + drift) * speed, 400, 1120);
+      bot.y = Phaser.Math.Clamp(bot.y + Math.sin(angle + drift) * speed, 190, 610);
+      this.syncTarget(id, bot);
+      index += 1;
+    }
+  }
+
+  private firePracticeShot(x: number, y: number, angle: number): void {
+    const dirX = Math.cos(angle);
+    const dirY = Math.sin(angle);
+    let victimId = "";
+    let victim: NetworkPlayer | undefined;
+    let nearest = 680;
+
+    for (const [id, candidate] of this.practicePlayers) {
+      if (candidate.team !== "droids" || !candidate.alive) continue;
+      const offsetX = candidate.x - x;
+      const offsetY = candidate.y - y;
+      const along = offsetX * dirX + offsetY * dirY;
+      const perpendicular = Math.abs(offsetX * dirY - offsetY * dirX);
+      if (along > 0 && along < nearest && perpendicular <= 25) {
+        victim = candidate;
+        victimId = id;
+        nearest = along;
+      }
+    }
+
+    this.drawShot({
+      shooterId: this.localId,
+      x1: x,
+      y1: y,
+      x2: x + dirX * nearest,
+      y2: y + dirY * nearest,
+      hit: Boolean(victim),
+    });
+
+    if (!victim) return;
+    victim.hp = Math.max(0, victim.hp - 34);
+    if (victim.hp === 0) {
+      victim.alive = false;
+      this.practiceScore += 1;
+      this.practicePlayers.get(this.localId)!.kills = this.practiceScore;
+      this.syncTarget(victimId, victim);
+      this.updatePracticeHud();
+      this.time.delayedCall(1400, () => {
+        if (!victim) return;
+        victim.hp = 100;
+        victim.alive = true;
+        victim.x = Phaser.Math.Between(760, 1060);
+        victim.y = Phaser.Math.Between(260, 540);
+        this.syncTarget(victimId, victim);
+      });
+    }
+  }
+
+  private updatePracticeHud(): void {
+    const player = this.practicePlayers.get(this.localId);
+    scoreText.innerHTML = `<span class="clone">TARGETS ${this.practiceScore}</span><span class="droid">PRACTICE RANGE</span>`;
+    if (player) {
+      identityText.textContent = `CLONES · ${player.name} · ${this.practiceScore} TARGETS`;
+      healthBar.style.setProperty("--health", "100%");
+    }
   }
 
   private drawShot(shot: ShotEvent): void {
@@ -231,6 +369,11 @@ async function deploy(): Promise<void> {
 }
 
 deployButton.addEventListener("click", deploy);
+practiceButton.addEventListener("click", () => {
+  battleScene.startPractice(callsignInput.value.trim());
+  menu.hidden = true;
+  hud.hidden = false;
+});
 callsignInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") void deploy();
 });

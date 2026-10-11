@@ -54,6 +54,8 @@ input:focus { border-color: #6fc9f4; box-shadow: 0 0 0 3px rgb(111 201 244 / 10%
 button { margin-top: 12px; padding: 15px; border: 0; color: #031018; background: #8cddff; cursor: pointer; text-transform: uppercase; letter-spacing: .12em; }
 button:hover { background: #c0edff; }
 button:disabled { cursor: wait; opacity: .55; }
+button.secondary { margin-top: 8px; color: #b9d6e4; border: 1px solid #315469; background: transparent; }
+button.secondary:hover { color: white; border-color: #71cbed; background: rgb(113 203 237 / 10%); }
 #status { min-height: 20px; color: #f0c878; font-size: 13px; }
 .controls { margin: 24px 0 0; color: #657d8b; font-size: 12px; }
 

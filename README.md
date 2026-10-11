@@ -24,6 +24,8 @@ pnpm dev
 
 Open `http://localhost:5173` in two browser windows to test multiplayer. The client connects to `ws://localhost:2567` by default.
 
+The **Practice Offline** button runs a browser-only target range and works on static hosts such as GitHub Pages. Public multiplayer still requires deploying the Colyseus server to a persistent Node.js host and setting `VITE_SERVER_URL` during the client build.
+
 Useful commands:
 
 ```bash
@@ -52,6 +54,10 @@ The browser sends movement and firing intent to a Colyseus room. The server owns
 3. Add command-post capture and a match timer.
 4. Add a room-code lobby and match restart flow.
 5. Replace procedural placeholders with original art and audio.
+
+## GitHub Pages
+
+The included GitHub Actions workflow builds and deploys the static browser client. Enable **Settings → Pages → Source: GitHub Actions** after creating the repository. The published build includes offline practice mode; the multiplayer Deploy button needs a separately hosted server.
 
 ## Where a collaborator can help
 
