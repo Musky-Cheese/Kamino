@@ -162,7 +162,7 @@ export class Battle {
     const actor = this.spawn(kind, from, fromZone);
     this.sendTo(actor, zone, this.world.enemyCover[zone], Math.random() < .5);
     actor.aggressive = kind === "b2" || Math.random() < .2;
-    if (Math.random() < .3) this.audio.rogerRoger(actor.position);
+    if (Math.random() < .3) this.audio.droidLine("roger", actor.position);
     return actor;
   }
 
@@ -189,7 +189,7 @@ export class Battle {
       this.sendTo(actor, toZone, this.world.enemyCover[toZone], Math.random() < .5);
       actor.state = "retreat";
       count++;
-      if (count === 1) this.audio.rogerRoger(actor.position);
+      if (count === 1) this.audio.droidLine(Math.random() < .7 ? "retreat" : "uhoh", actor.position);
     }
     return count;
   }
@@ -291,7 +291,7 @@ export class Battle {
       if (actor.kind === "b2") this.effects.explosion(chest, .55);
       this.effects.shatter(actor.rig.pieces(), direction.clone().setY(0).normalize(), Math.min(2.4, .8 + amount / 50));
       this.scene.remove(actor.rig.root);
-      this.audio.droidBreak(chest);
+      this.audio.droidBreak(chest, actor.kind === "b2");
       this.events.droidKilled(actor, byPlayer, headshot);
       this.actors.splice(this.actors.indexOf(actor), 1);
     } else {
@@ -472,7 +472,10 @@ export class Battle {
 
     // Animation.
     const stride = THREE.MathUtils.clamp(moved / Math.max(delta, 1e-4) / 3, 0, 1.3);
+    const lastStep = Math.floor(actor.walkPhase / Math.PI);
     actor.walkPhase += moved * 3.4;
+    // A footfall every half gait cycle; clones are drowned out by the player's own steps.
+    if (actor.team === "separatist" && Math.floor(actor.walkPhase / Math.PI) !== lastStep) this.audio.droidStep(actor.position, actor.kind === "b2");
     const wantCrouch = actor.state === "hold" && actor.peekOffset === 0 && !firing && actor.kind !== "b2" && actor.fireTimer > .4 ? 1 : 0;
     actor.crouch = THREE.MathUtils.lerp(actor.crouch, wantCrouch, Math.min(1, delta * 5));
     actor.height = actor.rig.height * (1 - actor.crouch * .3);

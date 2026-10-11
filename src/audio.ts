@@ -1,10 +1,35 @@
 import * as THREE from "three";
 
 export type BlasterVoice = "player" | "clone" | "droid" | "super";
+export type DroidLine = "roger" | "retreat" | "uhoh";
 
-/** Fully procedural sound: every effect is synthesised with Web Audio, no samples. */
+/**
+ * Recorded samples in public/audio/ (see the Credits in README.md), each with a few takes so
+ * repeats don't sound identical. Anything not yet loaded, or that fails to decode, falls back to
+ * the procedural synth below.
+ */
+const SAMPLES: Record<string, string[]> = {
+  blaster: ["blaster-1.ogg", "blaster-2.ogg", "blaster-3.ogg"],
+  hitMetal: ["hit-metal-1.ogg", "hit-metal-2.ogg", "hit-metal-3.ogg"],
+  hitArmor: ["hit-armor-1.ogg", "hit-armor-2.ogg", "hit-armor-3.ogg"],
+  break: ["break-1.ogg", "break-2.ogg", "break-3.ogg"],
+  clatter: ["clatter-1.ogg", "clatter-2.ogg"],
+  step: ["step-1.ogg", "step-2.ogg", "step-3.ogg", "step-4.ogg", "step-5.ogg"],
+  roger: ["droid-roger.wav"],
+  retreat: ["droid-retreat.wav"],
+  uhoh: ["droid-uhoh.wav"],
+};
+
+/** Overlapping shots beyond this are dropped (distant ones first) so big firefights don't swamp the mix. */
+const MAX_SHOTS = 14;
+
+/** Web Audio sound: recorded samples for weapons and droids, synthesis for ambience and UI. */
 export class GameAudio {
   private ctx?: AudioContext;
+  private readonly samples = new Map<string, AudioBuffer[]>();
+  private readonly lastTake = new Map<string, number>();
+  private activeShots = 0;
+  private driveCurve?: Float32Array<ArrayBuffer>;
   private master!: GainNode;
   private sfx!: GainNode;
   private reverbSend!: GainNode;
@@ -60,6 +85,41 @@ export class GameAudio {
       brown[i] = last * 3.5;
     }
     this.startAmbience();
+    void this.loadSamples(ctx);
+  }
+
+  private async loadSamples(ctx: AudioContext): Promise<void> {
+    await Promise.all(Object.entries(SAMPLES).map(async ([name, files]) => {
+      const takes = await Promise.all(files.map(async (file) => {
+        try {
+          const response = await fetch(`${import.meta.env.BASE_URL}audio/${file}`);
+          if (!response.ok) return null;
+          return await ctx.decodeAudioData(await response.arrayBuffer());
+        } catch {
+          return null;
+        }
+      }));
+      const loaded = takes.filter((take): take is AudioBuffer => !!take);
+      if (loaded.length) this.samples.set(name, loaded);
+    }));
+  }
+
+  /** Play a random take of `name` (never the same take twice running); null if it isn't loaded. */
+  private sample(name: string, out: AudioNode, rate = 1, gain = 1, at = 0, vary = .06): AudioBufferSourceNode | null {
+    const takes = this.samples.get(name);
+    if (!takes) return null;
+    const ctx = this.ctx!;
+    let index = Math.floor(Math.random() * takes.length);
+    if (takes.length > 1 && index === this.lastTake.get(name)) index = (index + 1) % takes.length;
+    this.lastTake.set(name, index);
+    const source = ctx.createBufferSource();
+    source.buffer = takes[index];
+    source.playbackRate.value = rate * (1 + (Math.random() - .5) * vary);
+    const level = ctx.createGain();
+    level.gain.value = gain;
+    source.connect(level).connect(out);
+    source.start(ctx.currentTime + at);
+    return source;
   }
 
   setVolume(value: number): void {
@@ -119,10 +179,36 @@ export class GameAudio {
   }
 
   blaster(voice: BlasterVoice, position: THREE.Vector3 | null): void {
+    if (this.activeShots >= MAX_SHOTS && voice !== "player") return;
     const out = this.spatial(position, voice === "player" ? 80 : 70, .3);
     if (!out) return;
+    // Under load, distant shots give way so the nearby ones stay clear.
+    if (this.activeShots >= MAX_SHOTS / 2 && voice !== "player" && (out as GainNode).gain.value < .25) return;
     const ctx = this.ctx!;
     const t = ctx.currentTime;
+    // Clones and the player fire bright, droid rifles lower, B2 wrist guns lowest.
+    const [rate, level] = { player: [1, .62], clone: [1.06, .5], droid: [.8, .55], super: [.66, .6] }[voice];
+    const shot = this.sample("blaster", out, rate, level, 0, .1);
+    if (shot) {
+      this.activeShots++;
+      shot.onended = () => this.activeShots--;
+      // A sharp muzzle crack on top of the bolt, and some weight under the heavier guns.
+      const crack = this.noiseSource();
+      const hp = ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 3000;
+      crack.connect(hp);
+      this.envelope(hp, .12, .001, .03).connect(out);
+      crack.start(t, Math.random()); crack.stop(t + .05);
+      if (voice === "player" || voice === "super") {
+        const body = ctx.createOscillator();
+        body.frequency.setValueAtTime(130, t);
+        body.frequency.exponentialRampToValueAtTime(48, t + .08);
+        this.envelope(body, voice === "player" ? .35 : .25, .002, .09).connect(out);
+        body.start(t); body.stop(t + .12);
+      }
+      return;
+    }
     const settings = {
       player: { f0: 1950, f1: 230, dur: .24, gain: .32, detune: .503 },
       clone: { f0: 1750, f1: 210, dur: .24, gain: .3, detune: .497 },
@@ -164,6 +250,7 @@ export class GameAudio {
   impact(position: THREE.Vector3, flesh = false): void {
     const out = this.spatial(position, 30, .2);
     if (!out) return;
+    if (this.sample(flesh ? "hitArmor" : "hitMetal", out, .9 + Math.random() * .25, flesh ? .55 : .3, 0, .1)) return;
     const ctx = this.ctx!;
     const t = ctx.currentTime;
     const source = this.noiseSource();
@@ -185,9 +272,15 @@ export class GameAudio {
   }
 
   /** Metallic clatter when a droid falls apart. */
-  droidBreak(position: THREE.Vector3): void {
+  droidBreak(position: THREE.Vector3, heavy = false): void {
     const out = this.spatial(position, 40, .25);
     if (!out) return;
+    if (this.sample("break", out, heavy ? .75 : 1, .65)) {
+      // Limbs and plating rattling onto the deck.
+      this.sample("clatter", out, 1 + Math.random() * .3, .4, .07 + Math.random() * .05, .15);
+      this.sample("hitMetal", out, .7 + Math.random() * .3, .25, .18 + Math.random() * .1, .2);
+      return;
+    }
     const ctx = this.ctx!;
     for (let i = 0; i < 5; i++) {
       const at = i * (.05 + Math.random() * .08);
@@ -357,10 +450,50 @@ export class GameAudio {
     whine.start(t); whine.stop(t + 2.2);
   }
 
-  /** B1 "Roger, roger." – a glottal buzz through moving formant filters. */
-  rogerRoger(position: THREE.Vector3): void {
+  /** One droid foot hitting the deck: a tinny tap for B1s, a heavy clank for B2s. */
+  droidStep(position: THREE.Vector3, heavy: boolean): void {
+    const out = this.spatial(position, 18, .15);
+    if (!out) return;
+    if (!this.sample("step", out, heavy ? .6 : 1.3, heavy ? .55 : .3, 0, .12)) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const ring = ctx.createOscillator();
+    ring.type = "triangle";
+    ring.frequency.value = heavy ? 220 + Math.random() * 40 : 1300 + Math.random() * 400;
+    this.envelope(ring, heavy ? .06 : .025, .001, heavy ? .12 : .04).connect(out);
+    ring.start(t); ring.stop(t + .15);
+  }
+
+  /**
+   * B1 radio chatter: recorded speech (see README) pitched up and pushed through a nasal band
+   * and a little saturation. Falls back to the formant synth for "roger".
+   */
+  droidLine(line: DroidLine, position: THREE.Vector3): void {
     const out = this.spatial(position, 35, .3);
     if (!out) return;
+    if (!this.samples.has(line)) {
+      if (line === "roger") this.rogerSynth(out);
+      return;
+    }
+    const ctx = this.ctx!;
+    if (!this.driveCurve) {
+      this.driveCurve = new Float32Array(1024);
+      for (let i = 0; i < 1024; i++) this.driveCurve[i] = Math.tanh((i / 511.5 - 1) * 2.6);
+    }
+    const highpass = ctx.createBiquadFilter();
+    highpass.type = "highpass"; highpass.frequency.value = 480;
+    const nasal = ctx.createBiquadFilter();
+    nasal.type = "peaking"; nasal.frequency.value = 1700; nasal.Q.value = 1.4; nasal.gain.value = 9;
+    const drive = ctx.createWaveShaper();
+    drive.curve = this.driveCurve;
+    const lowpass = ctx.createBiquadFilter();
+    lowpass.type = "lowpass"; lowpass.frequency.value = 4500;
+    highpass.connect(nasal).connect(drive).connect(lowpass).connect(out);
+    this.sample(line, highpass, 1.2, .8, 0, .05);
+  }
+
+  /** "Roger, roger." – a glottal buzz through moving formant filters. */
+  private rogerSynth(out: AudioNode): void {
     const ctx = this.ctx!;
     const t = ctx.currentTime;
     const glottal = ctx.createOscillator();
@@ -396,15 +529,49 @@ export class GameAudio {
     glottal.start(t); glottal.stop(cursor + .2);
   }
 
+  /** Six seconds of stereo rain, built drop by drop so it loops without an audible seam. */
+  private rainBuffer(): AudioBuffer {
+    const ctx = this.ctx!;
+    const rate = ctx.sampleRate;
+    const buffer = ctx.createBuffer(2, rate * 6, rate);
+    for (let channel = 0; channel < 2; channel++) {
+      const data = buffer.getChannelData(channel);
+      const length = data.length;
+      const drop = (start: number, frequency: number, decay: number, amplitude: number) => {
+        const w = 2 * Math.PI * frequency / rate;
+        const n = Math.ceil(decay * rate * 5);
+        for (let i = 0; i < n; i++) data[(start + i) % length] += amplitude * Math.sin(w * i) * Math.exp(-i / (decay * rate));
+      };
+      // Fine patter, most drops faint: amplitude falls off with a power law.
+      for (let i = 0; i < 6 * 420; i++) drop(Math.floor(Math.random() * length), 2200 + Math.random() * 5500, .0012 + Math.random() * .002, .5 * Math.random() ** 3);
+      // Heavier drips off railings and hull plates.
+      for (let i = 0; i < 6 * 5; i++) drop(Math.floor(Math.random() * length), 900 + Math.random() * 1800, .012 + Math.random() * .02, .12 + Math.random() * .2);
+      // A soft wash underneath so the gaps aren't dead silence.
+      let low = 0;
+      for (let i = 0; i < length; i++) {
+        low += .35 * ((Math.random() * 2 - 1) - low);
+        data[i] += low * .05;
+      }
+    }
+    return buffer;
+  }
+
   private startAmbience(): void {
     const ctx = this.ctx!;
-    const rain = this.noiseSource(this.noise, true);
-    const rainBand = ctx.createBiquadFilter();
-    rainBand.type = "highpass"; rainBand.frequency.value = 900;
+    // Steady drizzle: thousands of tiny droplet ticks plus the odd fat drip ringing on metal,
+    // breathing with the wind gusts instead of a flat hiss.
+    const rain = this.noiseSource(this.rainBuffer(), true);
+    const rainTone = ctx.createBiquadFilter();
+    rainTone.type = "lowpass"; rainTone.frequency.value = 9000;
     const rainGain = ctx.createGain();
-    rainGain.gain.value = .07;
-    rain.connect(rainBand).connect(rainGain).connect(this.master);
-    rain.start();
+    rainGain.gain.value = .12;
+    const gust = ctx.createOscillator();
+    gust.frequency.value = .07;
+    const gustDepth = ctx.createGain();
+    gustDepth.gain.value = .035;
+    gust.connect(gustDepth).connect(rainGain.gain);
+    rain.connect(rainTone).connect(rainGain).connect(this.master);
+    rain.start(); gust.start();
 
     const sea = this.noiseSource(this.brown, true);
     const seaLp = ctx.createBiquadFilter();

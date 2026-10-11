@@ -113,8 +113,17 @@ Surface textures (all CC0), converted to WebP by `scripts/fetch-textures.mjs`:
 | Leaking012A, SurfaceImperfections003 | Rain streaks, grime, glass smudges | [ambientCG](https://ambientcg.com/view?id=Leaking012A), [ambientCG](https://ambientcg.com/view?id=SurfaceImperfections003) |
 | rusty_metal_02 | Droid rust mask | [Poly Haven](https://polyhaven.com/a/rusty_metal_02) |
 
+Sound effects (all CC0) in `public/audio/`, pitched and layered in `src/audio.ts`:
+
+| Sound | Used for | Source |
+| --- | --- | --- |
+| Sci-Fi Sounds: laserSmall, impactMetal | Blaster shots, droid debris clatter | [Kenney](https://kenney.nl/assets/sci-fi-sounds) |
+| Impact Sounds: impactMetal, impactPlate, footstep_concrete | Bolt hits, droids breaking apart, droid footsteps | [Kenney](https://kenney.nl/assets/impact-sounds) |
+
+The B1 voice lines are original recordings made with the Windows text-to-speech voice and processed in-game. Rain, wind, sea, thunder and UI sounds are synthesised.
+
 ## Project status
 
 Built with TypeScript, Three.js and Vite. The earlier top-down multiplayer experiment is preserved at Git tag `prototype-top-down-v0.1`.
 
-This project is unofficial and is not affiliated with or endorsed by Lucasfilm, Disney, or Electronic Arts. It uses the fan-made models credited above plus original procedural geometry, textures and sound, and no official game assets.
+This project is unofficial and is not affiliated with or endorsed by Lucasfilm, Disney, or Electronic Arts. It uses the fan-made models credited above plus the CC0 textures and sounds credited above and original procedural geometry and sound, and no official game assets.

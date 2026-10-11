@@ -219,7 +219,7 @@ export class VolumetricPass extends Pass {
           vec3 wind = vec3(-3.2, 0., -1.2) * uTime;
           float clumps = noise3((p + wind) * .12);
           float streaks = noise3(vec3(p.x * 1.6, p.y * .08 + uTime * 2.4, p.z * 1.6));
-          return uDensity * (.35 + clumps * .9 + streaks * .5);
+          return uDensity * (.35 + clumps * .9 + streaks * .2);
         }
         float phase(float cosTheta) {
           float g = .3;

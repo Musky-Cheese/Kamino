@@ -120,7 +120,7 @@ export class Environment {
         }`,
     });
     const splashGeometry = new THREE.PlaneGeometry(.32, .32).rotateX(-Math.PI / 2);
-    const count = 520;
+    const count = 200;
     this.splashes = new THREE.InstancedMesh(splashGeometry, this.splashMaterial, count);
     this.splashes.geometry.setAttribute("aPhase", new THREE.InstancedBufferAttribute(new Float32Array(count), 1));
     this.splashes.frustumCulled = false;
@@ -239,7 +239,7 @@ export class Environment {
   }
 
   private buildRain(): THREE.Mesh {
-    const count = 11000;
+    const count = 4200;
     const base = new THREE.PlaneGeometry(1, 1);
     const geometry = new THREE.InstancedBufferGeometry();
     geometry.index = base.index;
@@ -268,7 +268,7 @@ export class Environment {
         void main() {
           vec3 box = vec3(56., 34., 56.);
           float speed = 22. + aOffset.w * 8.;
-          vec3 wind = vec3(-3.2, -speed, -1.2);
+          vec3 wind = vec3(-4.2, -speed, -1.6);
           vec3 p = aOffset.xyz * box + wind * uTime;
           vec3 rel = mod(p - uCamera, box) - box * .5;
           vec3 world = uCamera + rel;
@@ -289,7 +289,7 @@ export class Environment {
         void main() {
           float across = 1. - abs(vUv.x - .5) * 2.;
           float along = smoothstep(0., .35, vUv.y) * smoothstep(1., .6, vUv.y);
-          float a = across * along * vFade * .2;
+          float a = across * along * vFade * .13;
           gl_FragColor = vec4(vec3(.66, .8, .9) * (1. + uFlash * 3.), a);
         }`,
     });
@@ -301,7 +301,7 @@ export class Environment {
 
   /** Distant rain: scrolling streak curtains on cylinders around the camera, beyond the particle rain. */
   private buildRainCurtains(): void {
-    for (const [radius, opacity, density] of [[34, .16, 300], [70, .12, 520], [130, .1, 900]] as const) {
+    for (const [radius, opacity, density] of [[34, .08, 220], [70, .065, 380], [130, .055, 640]] as const) {
       const material = new THREE.ShaderMaterial({
         transparent: true,
         depthWrite: false,
@@ -322,7 +322,7 @@ export class Environment {
             float y = fract(uv.y + uTime * (1.6 + r * 1.2) + r * 17.);
             float streak = smoothstep(0., .04, y) * smoothstep(.3, .06, y);
             float across = smoothstep(.12, 0., abs(fract(uv.x) - .5));
-            float keep = step(.45, hash(column + 7.31));
+            float keep = step(.62, hash(column + 7.31));
             float fade = smoothstep(0., .25, vUv.y) * smoothstep(1., .6, vUv.y);
             float a = streak * across * keep * fade * uOpacity;
             gl_FragColor = vec4(vec3(.62, .76, .86) * (1. + uFlash * 4.) * a, 1.);

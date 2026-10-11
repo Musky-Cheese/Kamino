@@ -693,7 +693,7 @@ export class KaminoGame {
     this.reflections.render(this.renderer, this.scene, this.camera, hidden);
     this.updateVolumeLights();
     this.compositePass.ads = this.ads * (1 - this.scope);
-    (this.grade.uniforms.uRain as THREE.IUniform).value = this.started ? .55 + Math.max(0, this.camera.rotation.x) * .6 : .35;
+    (this.grade.uniforms.uRain as THREE.IUniform).value = this.started ? .28 + Math.max(0, this.camera.rotation.x) * .45 : .2;
     this.composer.render(this.renderDelta);
     this.camera.quaternion.copy(saved);
   }
