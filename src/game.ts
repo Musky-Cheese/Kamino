@@ -434,6 +434,7 @@ export class KaminoGame {
       this.placePlayerCamera();
       this.radio("Command · Tipoca", "All units: droids have overrun Besh Junction. Push across the bridges and drive them back!");
       this.radio("Sergeant", "On me, trooper. Watch those bridges—there's no cover out there.");
+      this.radio("Sergeant", "Aim with right click, and crouch behind the barricades with C. Your armor recovers if you stay out of fire.");
       this.banner("The Battle of Kamino", "Push them back");
     }
     if (this.testMode) {
@@ -815,6 +816,7 @@ export class KaminoGame {
         else if (!final && alive <= 2) {
           const fled = alive > 0 ? this.battle.retreat(zone, zone + 1) : 0;
           if (fled) this.radio("Sergeant", "They're falling back! Don't let them regroup!");
+          this.banner(fled ? "Droids falling back" : "Sector clear", `Secure ${ZONES[zone].name}`);
           p.state = "capture";
           this.deployNextDefenders();
           this.battle.moveAllies(zone);
@@ -866,6 +868,7 @@ export class KaminoGame {
     ];
     const line = lines[p.index];
     if (line) this.radio(line[0], line[1]);
+    if (p.index === 0) this.radio("Sergeant", "Supers shrug off blaster fire. Crack them open with a thermal detonator: G.");
     // Reinforce the squad.
     const living = this.battle.aliveCount("republic");
     const back = ZONES[Math.max(0, zone - 1)].center;
@@ -1113,7 +1116,15 @@ export class KaminoGame {
 
     // World-space objective marker.
     const marker = this.$("#marker");
-    const target = p.state === "capture" ? new THREE.Vector3(zone.capture.x, 2.4, zone.capture.y) : new THREE.Vector3(zone.center.x, 3, zone.center.y);
+    let target = p.state === "capture" ? new THREE.Vector3(zone.capture.x, 2.4, zone.capture.y) : new THREE.Vector3(zone.center.x, 3, zone.center.y);
+    // Once reinforcements are spent, point at the nearest straggler so the last droids are never lost.
+    if (p.state === "fight" && p.spawned >= p.spec.quota) {
+      const stragglers = this.battle.actors.filter((a) => a.alive && a.team === "separatist");
+      if (stragglers.length && stragglers.length <= 3) {
+        stragglers.sort((a, b) => a.position.distanceToSquared(this.feet) - b.position.distanceToSquared(this.feet));
+        target = stragglers[0].position.clone().setY(stragglers[0].position.y + 2.3);
+      }
+    }
     const projected = target.clone().project(this.camera);
     const behind = projected.z > 1;
     let sx = (projected.x * .5 + .5) * innerWidth, sy = (-projected.y * .5 + .5) * innerHeight;

@@ -53,7 +53,7 @@ export class WetReflections {
             float f = 1. - facing;
             float fresnel = .03 + .97 * f * f * f * f;
             vec3 reflected = textureLod(tReflect, ruv, roughnessFactor * 6.).rgb;
-            outgoingLight += min(reflected, vec3(12.)) * fresnel * wet * uReflectStrength * 2.2;
+            outgoingLight += min(reflected, vec3(2.5)) * fresnel * wet * uReflectStrength * 2.2;
           }
           #include <opaque_fragment>`);
     };

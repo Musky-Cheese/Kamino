@@ -370,7 +370,7 @@ export class World {
     b.add(new THREE.PlaneGeometry(1.25, .38), m.warmLight, lens, { cast: false, shoot: false });
     this.nav.addCircle(x, z, .45, height);
 
-    const spot = new THREE.SpotLight(0xffe4c0, 520, 60, .62, .55, 1.6);
+    const spot = new THREE.SpotLight(0xffe4c0, 210, 60, .62, .85, 1.6);
     spot.position.copy(head);
     spot.target.position.copy(target);
     this.scene.add(spot, spot.target);

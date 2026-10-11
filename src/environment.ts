@@ -53,6 +53,7 @@ export class Environment {
   private readonly splashMaterial: THREE.ShaderMaterial;
   private readonly fogBanks: Array<{ sprite: THREE.Sprite; speed: number; base: THREE.Vector3 }> = [];
   private readonly bolts: Array<{ mesh: THREE.Group; ttl: number }> = [];
+  private readonly curtains: THREE.Mesh[] = [];
   private readonly random = rng(1337);
   private nextLightning = 4;
   onThunder?: (distance: number, strength: number) => void;
@@ -127,12 +128,13 @@ export class Environment {
     scene.add(this.splashes);
 
     this.buildFogBanks();
+    this.buildRainCurtains();
   }
 
   get oceanMesh(): THREE.Mesh { return this.ocean; }
 
   /** Screen-space weather that must not appear in the deck reflection pass. */
-  get reflectionHidden(): THREE.Object3D[] { return [this.rain, this.splashes]; }
+  get reflectionHidden(): THREE.Object3D[] { return [this.rain, this.splashes, ...this.curtains]; }
 
   /** Pre-filtered environment for metal reflections, rendered from the storm sky plus distant city glows. */
   createEnvironmentMap(renderer: THREE.WebGLRenderer): THREE.Texture {
@@ -297,6 +299,43 @@ export class Environment {
     return mesh;
   }
 
+  /** Distant rain: scrolling streak curtains on cylinders around the camera, beyond the particle rain. */
+  private buildRainCurtains(): void {
+    for (const [radius, opacity, density] of [[34, .16, 300], [70, .12, 520], [130, .1, 900]] as const) {
+      const material = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        side: THREE.BackSide,
+        blending: THREE.AdditiveBlending,
+        uniforms: { uTime: this.rainUniforms.uTime, uFlash: this.rainUniforms.uFlash, uOpacity: { value: opacity }, uDensity: { value: density } },
+        vertexShader: /* glsl */ `
+          varying vec2 vUv;
+          void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: /* glsl */ `
+          uniform float uTime, uFlash, uOpacity, uDensity;
+          varying vec2 vUv;
+          float hash(float n) { return fract(sin(n * 91.3458) * 47453.5453); }
+          void main() {
+            vec2 uv = vUv * vec2(uDensity, 5.);
+            float column = floor(uv.x);
+            float r = hash(column);
+            float y = fract(uv.y + uTime * (1.6 + r * 1.2) + r * 17.);
+            float streak = smoothstep(0., .04, y) * smoothstep(.3, .06, y);
+            float across = smoothstep(.12, 0., abs(fract(uv.x) - .5));
+            float keep = step(.45, hash(column + 7.31));
+            float fade = smoothstep(0., .25, vUv.y) * smoothstep(1., .6, vUv.y);
+            float a = streak * across * keep * fade * uOpacity;
+            gl_FragColor = vec4(vec3(.62, .76, .86) * (1. + uFlash * 4.) * a, 1.);
+          }`,
+      });
+      const curtain = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 70, 48, 1, true), material);
+      curtain.frustumCulled = false;
+      curtain.renderOrder = 4;
+      this.curtains.push(curtain);
+      this.scene.add(curtain);
+    }
+  }
+
   private buildFogBanks(): void {
     const texture = smokeTexture(99);
     for (let i = 0; i < 46; i++) {
@@ -384,6 +423,7 @@ export class Environment {
     this.rainUniforms.uCamera.value.copy(camera.position);
     this.rainUniforms.uFlash.value = flicker;
     this.splashMaterial.uniforms.uFlash.value = flicker;
+    for (const curtain of this.curtains) curtain.position.set(camera.position.x, camera.position.y + 10, camera.position.z);
     this.ocean.position.x = Math.round(camera.position.x / 10) * 10;
     this.ocean.position.z = Math.round(camera.position.z / 10) * 10;
 
