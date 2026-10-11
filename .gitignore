@@ -8,4 +8,5 @@ dist-server/
 .DS_Store
 Thumbs.db
 .chrome-visual-qa/
-
+# Raw asset downloads (inputs to scripts/optimize-models.mjs and scripts/fetch-textures.mjs)
+_downloads/

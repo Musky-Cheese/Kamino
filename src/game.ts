@@ -21,6 +21,7 @@ const SEARCH_HAZE = new THREE.Color(.8, .9, 1).multiplyScalar(5);
 const FIRE_HAZE = new THREE.Color(1, .42, .12).multiplyScalar(2.5);
 const LAMP_HAZE = new THREE.Color(1, .84, .6).multiplyScalar(.8);
 import { loadModels } from "./models";
+import { loadSurfaces } from "./surfaces";
 import { STEP_HEIGHT } from "./navigation";
 import { Viewmodel } from "./weapon";
 import { World } from "./world";
@@ -228,13 +229,20 @@ export class KaminoGame {
       await nextFrame();
     };
     await progress(.02, "Requisitioning gunships…");
-    await loadModels((fraction) => { this.$("#load-bar").style.width = `${(.02 + fraction * .28) * 100}%`; });
+    // Models and surface textures stream in parallel; the bar tracks both (models dominate the bytes).
+    let modelsDone = 0, surfacesDone = 0;
+    const bar = () => { this.$("#load-bar").style.width = `${(.02 + modelsDone * .22 + surfacesDone * .06) * 100}%`; };
+    const [, surfaces] = await Promise.all([
+      loadModels((fraction) => { modelsDone = fraction; bar(); }),
+      loadSurfaces(this.quality === "low", (fraction) => { surfacesDone = fraction; bar(); }),
+    ]);
     await progress(.3, "Forging hull plating…");
     this.scene.fog = this.fog;
     this.scene.background = new THREE.Color(0x05101a);
-    this.materials = new Materials(this.renderer.capabilities.getMaxAnisotropy());
+    this.materials = new Materials(this.renderer.capabilities.getMaxAnisotropy(), surfaces);
     this.reflections.patch(this.materials.deck);
     this.reflections.patch(this.materials.deckDark);
+    this.materials.wetDecks();
     await progress(.35, "Raising Tipoca City…");
     this.world = new World(this.scene, this.materials);
     this.world.build();
@@ -328,6 +336,7 @@ export class KaminoGame {
     this.quality = quality;
     localStorage.setItem("kamino.quality", quality);
     document.querySelectorAll<HTMLSelectElement>(".quality-select").forEach((select) => select.value = quality);
+    this.materials.setDetail(quality !== "low");
     const ratio = quality === "high" ? Math.min(devicePixelRatio * 1.25, 2) : quality === "medium" ? Math.min(devicePixelRatio, 1.25) : Math.min(devicePixelRatio, 1) * .8;
     this.renderer.setPixelRatio(ratio);
     this.composer.setPixelRatio(ratio);

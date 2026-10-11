@@ -663,6 +663,7 @@ export class World {
   }
 
   update(delta: number, time: number): void {
+    this.m.update(time);
     this.updateVultures(delta, time);
     for (const flyer of this.flyers) {
       const a = flyer.phase + time * flyer.speed;

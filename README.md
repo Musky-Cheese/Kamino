@@ -76,9 +76,12 @@ Build the production version with `pnpm build`. Add `?test` to the URL to skip t
 | `src/weapon.ts` | First-person DC-15A |
 | `src/effects.ts` | Sparks, scorch marks, explosions, debris, light pool |
 | `src/audio.ts` | Procedural sound |
-| `src/textures.ts` / `src/materials.ts` | Procedural PBR textures and shared materials |
+| `src/materials.ts` | Shared materials: photo-scanned surface sets with procedural fallbacks |
+| `src/surfaces.ts` | Surface texture loading; shader detail: wall streaks and grime, deck puddles with rain ripples, droid wear |
+| `src/textures.ts` | Procedural textures (pad markings, smoke, scorch; fallback PBR sets) |
 | `src/batcher.ts` | Static geometry merging + BVH raycasting |
 | `scripts/optimize-models.mjs` | Rebuilds `public/models/` from the raw downloads (gltf-transform: meshopt, WebP, 2K max) |
+| `scripts/fetch-textures.mjs` | Downloads the CC0 surface sets and writes `public/textures/` (2K) and `public/textures/low/` (1K) |
 
 ## Credits
 
@@ -93,6 +96,18 @@ Third-party models, used under [CC BY 4.0](https://creativecommons.org/licenses/
 | Battle Droid B1 | Andrés Kuiper | [Sketchfab](https://sketchfab.com/3d-models/battle-droid-b1-3ee39289d86a45cd894f61e269ea10ed) |
 | Super Battle Droid B2 Animated (based on Andrés Kuiper's B2) | Suvalien | [Sketchfab](https://sketchfab.com/3d-models/super-battle-droid-b2-animated-training-a0f947934672450bad323d6438499812) |
 | Universal Animation Library (CC0, retargeted onto the clone and B1) | Quaternius | [quaternius.com](https://quaternius.com/packs/universalanimationlibrary.html) |
+
+Surface textures (all CC0), converted to WebP by `scripts/fetch-textures.mjs`:
+
+| Texture | Used for | Source |
+| --- | --- | --- |
+| MetalPlates004 | Deck plating | [ambientCG](https://ambientcg.com/view?id=MetalPlates004) |
+| MetalPlates008 | Bridge decks | [ambientCG](https://ambientcg.com/view?id=MetalPlates008) |
+| blue_metal_plate (desaturated) | White Kaminoan hull | [Poly Haven](https://polyhaven.com/a/blue_metal_plate) |
+| MetalPlates001 | Dark hull | [ambientCG](https://ambientcg.com/view?id=MetalPlates001) |
+| Metal032 | Wet steel trim | [ambientCG](https://ambientcg.com/view?id=Metal032) |
+| Leaking012A, SurfaceImperfections003 | Rain streaks, grime, glass smudges | [ambientCG](https://ambientcg.com/view?id=Leaking012A), [ambientCG](https://ambientcg.com/view?id=SurfaceImperfections003) |
+| rusty_metal_02 | Droid rust mask | [Poly Haven](https://polyhaven.com/a/rusty_metal_02) |
 
 ## Project status
 

@@ -4,6 +4,19 @@ import { buildDC15, buildE5, type ActorKind, type Pose, type Rig } from "./actor
 import "./batcher"; // installs computeBoundsTree / accelerated raycasting on three's prototypes
 import { getModel, hasModel, instantiate } from "./models";
 import { retargetClips, rotateWorld } from "./retarget";
+import { addWear } from "./surfaces";
+
+/** Dirt and rust on every textured material of a template (materials are shared by all clones of it). */
+function wear(root: THREE.Object3D, dirt: number, rust: number, tiling: number): void {
+  const done = new Set<THREE.Material>();
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    const material = object.material as THREE.MeshStandardMaterial;
+    if (done.has(material) || !material.isMeshStandardMaterial) return;
+    done.add(material);
+    addWear(material, dirt, rust, tiling);
+  });
+}
 
 /**
  * Animated character rigs built from the loaded glTF models (credits in README.md).
@@ -210,6 +223,7 @@ const CLONE_MAP: Record<string, string> = {
 
 function cloneTemplate(): Template {
   const root = instantiate("clone", { height: 1.83 });
+  wear(root, .35, 0, 2);
   const bones: THREE.Object3D[] = [];
   root.traverse((object) => { if ((object as THREE.Bone).isBone) bones.push(object); });
   const clips = libraryClips(root, bones, CLONE_MAP, "Hips_01");
@@ -233,6 +247,7 @@ const B1_REPARENT: Array<[string, string]> = [["Bone006L_27", "Bone005R_7"], ["B
 
 function b1Template(): Template {
   const root = instantiate("b1", { height: 1.92 });
+  wear(root, .55, .45, 3);
   root.updateMatrixWorld(true);
   for (const [child, parent] of B1_REPARENT) root.getObjectByName(parent)!.attach(root.getObjectByName(child)!);
   const bones: THREE.Object3D[] = [];
@@ -255,6 +270,7 @@ const B2_PROXIES = ["torso_013", "waist_011", "thighl_034", "thighr_037", "shinl
 
 function b2Template(): Template {
   const root = instantiate("b2", { height: 2.05 });
+  wear(root, .45, .3, 3);
   const gltf = getModel("b2")!;
   const clips = new Map(gltf.animations.map((clip) => [clip.name.trim(), clip]));
   const mesh = root.getObjectByProperty("isSkinnedMesh", true) as THREE.SkinnedMesh;
