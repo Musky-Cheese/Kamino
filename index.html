@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#071521" />
+    <title>Kamino — Multiplayer Prototype</title>
+  </head>
+  <body>
+    <main id="app">
+      <section id="menu" class="panel">
+        <p class="eyebrow">UNOFFICIAL FAN-MADE PROTOTYPE</p>
+        <h1>KAMINO</h1>
+        <p class="subtitle">Clones and droids clash above the storm.</p>
+        <label>
+          Callsign
+          <input id="callsign" maxlength="16" autocomplete="nickname" placeholder="CT-1010" />
+        </label>
+        <button id="deploy" type="button">Deploy</button>
+        <p id="status">Connecting to the battle network…</p>
+        <p class="controls">WASD to move · mouse to aim · click to fire</p>
+      </section>
+      <div id="game"></div>
+      <div id="hud" hidden>
+        <div id="score"><span class="clone">CLONES 0</span><span class="droid">DROIDS 0</span></div>
+        <div id="identity"></div>
+        <div id="health"></div>
+      </div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
