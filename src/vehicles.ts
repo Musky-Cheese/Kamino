@@ -64,6 +64,34 @@ export function buildGunship(m: Materials): Gunship {
   return { group: g, blinkers, searchlight };
 }
 
+/** Separatist vulture droid in flight mode: a narrow body with four blade wings in an X, red photoreceptors. Nose toward -Z. */
+export function buildVulture(m: Materials): { group: THREE.Group; guns: THREE.Object3D[] } {
+  const g = new THREE.Group();
+  const body = mesh(g, taperedBox(.9, .9, 4.6, .5, .55), m.sepHull, 0, 0, 0);
+  body.castShadow = false;
+  mesh(g, new THREE.SphereGeometry(.55, 12, 8), m.sepDark, 0, 0, -2.3).scale.set(1, .8, 1.3);
+  for (const s of [-1, 1]) mesh(g, new THREE.SphereGeometry(.12, 8, 6), m.redLight, s * .25, .12, -2.95);
+  mesh(g, new THREE.CylinderGeometry(.34, .44, .6, 12), m.sepDark, 0, 0, 2.5, Math.PI / 2);
+  mesh(g, new THREE.CircleGeometry(.32, 12), m.amberLight, 0, 0, 2.81);
+  const guns: THREE.Object3D[] = [];
+  for (const sx of [-1, 1]) {
+    for (const sy of [-1, 1]) {
+      const wing = new THREE.Group();
+      wing.position.set(sx * .4, sy * .25, .3);
+      wing.rotation.z = sx * sy * .38;
+      g.add(wing);
+      mesh(wing, taperedBox(3.6, .1, 1.5, 1, 1, 1, 1), m.sepHull, sx * 1.9, 0, 0, 0, sx * -.18, 0);
+      mesh(wing, new THREE.BoxGeometry(.18, .18, 1.6), m.sepDark, sx * 3.7, 0, -.4);
+      const gun = new THREE.Object3D();
+      gun.position.set(sx * 3.7, 0, -1.3);
+      wing.add(gun);
+      guns.push(gun);
+    }
+  }
+  g.traverse((object) => { if (object instanceof THREE.Mesh) { object.castShadow = false; object.receiveShadow = false; } });
+  return { group: g, guns };
+}
+
 export type Lander = { group: THREE.Group; lights: THREE.Mesh[] };
 
 /** Separatist landing craft. Nose and boarding ramp face +Z. `crashed` adds sprawling spider legs instead of landing struts. */

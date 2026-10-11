@@ -154,6 +154,8 @@ export class KaminoGame {
   private hitMarkerTimer = 0;
   private lowHealthWarned = false;
   private readonly scheduled: Array<{ at: number; task: () => void }> = [];
+  private ambientTimer = 1.5;
+  private readonly perf = { frames: 0, elapsed: 0, checked: false, last: -1 };
 
   private readonly $ = <T extends HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 
@@ -478,7 +480,7 @@ export class KaminoGame {
     const simulating = this.started && !this.ended && !this.paused;
     // Game time stands still while paused so scheduled mission events wait too.
     if (simulating || !this.started) this.time += delta;
-    if (simulating) this.runScheduled();
+    if (simulating || !this.started) this.runScheduled();
 
     if (this.running) {
       this.missionTime += delta;
@@ -510,9 +512,11 @@ export class KaminoGame {
     });
     this.lookX = this.lookY = 0;
     this.audio.setListener(this.camera.position, this.camera.quaternion);
-    this.audio.update(delta, this.health, this.started && !this.ended);
+    this.audio.update(delta, this.health);
+    this.updateAmbientBattle(delta);
     this.updateHudFrame(delta);
     this.render();
+    this.watchPerformance();
   }
 
   private render(): void {
@@ -881,6 +885,100 @@ export class KaminoGame {
       this.banner("Push forward", ZONES[this.phase.spec.enemyZone].name, true);
       this.audio.ui("alert");
     });
+  }
+
+  /**
+   * The wider battle for Tipoca City: volleys between outlying platforms, gunship strafing runs and
+   * distant explosions, seen and heard around the player's own fight.
+   */
+  private updateAmbientBattle(delta: number): void {
+    if (this.ended) return;
+    // Vulture droids: whoosh as they pass close, strafe the decks below.
+    for (const vulture of this.world.vultures) {
+      const position = vulture.group.position;
+      const distance = position.distanceTo(this.camera.position);
+      const cooldown = (vulture.group.userData.flybyAt as number | undefined) ?? -10;
+      if (distance < 55 && this.time - cooldown > 5) {
+        vulture.group.userData.flybyAt = this.time;
+        this.audio.flyby(position);
+      }
+      const strafeAt = (vulture.group.userData.strafeAt as number | undefined) ?? 0;
+      if (position.y < 30 && distance < 110 && this.time > strafeAt) {
+        vulture.group.userData.strafeAt = this.time + 3 + Math.random() * 3;
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(vulture.group.quaternion);
+        for (let i = 0; i < 6; i++) {
+          this.schedule(i * .09, () => {
+            const gun = vulture.guns[i % vulture.guns.length].getWorldPosition(new THREE.Vector3());
+            const aim = gun.clone().addScaledVector(forward, 30 + i * 4).setY(0);
+            aim.x += (Math.random() - .5) * 6; aim.z += (Math.random() - .5) * 6;
+            this.battle.tracer(gun, aim, "separatist", 120);
+            if (i % 2 === 0) this.audio.blaster("super", gun);
+            this.schedule(gun.distanceTo(aim) / 120, () => {
+              if (this.world.nav.groundAt(aim.x, aim.z) !== null) {
+                this.effects.impact(aim, new THREE.Vector3(0, 1, 0), BOLT_COLORS.red, true);
+                if (aim.distanceTo(this.feet) < 3) this.hurt(6, gun);
+              }
+            });
+          });
+        }
+      }
+    }
+    this.ambientTimer -= delta;
+    if (this.ambientTimer > 0) return;
+    this.ambientTimer = .4 + Math.random() * 1.3;
+    const points = this.world.ambientPoints.filter((p) => p.distanceTo(this.feet) > 40);
+    if (points.length < 2) return;
+    const pick = () => points[Math.floor(Math.random() * points.length)];
+    const roll = Math.random();
+    const volley = (from: THREE.Vector3, to: THREE.Vector3, team: "republic" | "separatist", shots: number) => {
+      for (let i = 0; i < shots; i++) {
+        this.schedule(i * (team === "separatist" ? .2 : .14), () => {
+          const end = to.clone().add(new THREE.Vector3((Math.random() - .5) * 4, Math.random() * 2, (Math.random() - .5) * 4));
+          this.battle.tracer(from, end, team, 85);
+          this.audio.blaster(team === "separatist" ? "droid" : "clone", from);
+          const travel = from.distanceTo(end) / 85;
+          this.schedule(travel, () => {
+            this.effects.sparksAt(end, new THREE.Vector3(0, 1, 0), team === "separatist" ? BOLT_COLORS.red : BOLT_COLORS.blue, 6, 4);
+            this.effects.glow(end, (team === "separatist" ? BOLT_COLORS.red : BOLT_COLORS.blue).clone().multiplyScalar(.2), 1.2, .15);
+          });
+        });
+      }
+    };
+    if (roll < .1) {
+      const where = pick().clone();
+      this.effects.explosion(where, .9);
+      this.audio.explosion(where, .8);
+    } else if (roll < .22) {
+      const guns = this.world.gunshipGuns();
+      const gun = guns[Math.floor(Math.random() * guns.length)];
+      volley(gun, pick(), "republic", 5);
+    } else {
+      const a = pick(), b = pick();
+      if (a.distanceTo(b) < 15) return;
+      volley(a, b, Math.random() < .55 ? "separatist" : "republic", 2 + Math.floor(Math.random() * 3));
+      if (Math.random() < .5) this.schedule(.5, () => volley(b, a, Math.random() < .5 ? "republic" : "separatist", 2 + Math.floor(Math.random() * 2)));
+    }
+  }
+
+  /**
+   * After a few seconds of real play, step graphics down once if the machine can't hold ~40 fps,
+   * so the default preset never leaves someone with a slideshow.
+   */
+  private watchPerformance(): void {
+    if (this.perf.checked || !this.running || this.testMode) return;
+    const now = performance.now();
+    const last = this.perf.last;
+    this.perf.last = now;
+    if (last < 0 || now - last > 250) return;
+    this.perf.frames++;
+    this.perf.elapsed += now - last;
+    if (this.perf.elapsed < 5000) return;
+    this.perf.checked = true;
+    const fps = this.perf.frames / (this.perf.elapsed / 1000);
+    if (fps < 40 && this.quality !== "low") {
+      this.applyQuality(this.quality === "high" ? "medium" : "low");
+      this.radio("System", `Graphics lowered to ${this.quality} to keep the battle smooth (${Math.round(fps)} fps). Change it any time from the pause menu.`);
+    }
   }
 
   /** Run `task` after `delay` seconds of game time (pauses with the game). */

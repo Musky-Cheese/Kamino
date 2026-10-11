@@ -247,7 +247,7 @@ export class Battle {
   }
 
   /** Visual-only bolt for hitscan player shots. Travels from the muzzle to the hit point. */
-  tracer(origin: THREE.Vector3, end: THREE.Vector3, team: Team): void {
+  tracer(origin: THREE.Vector3, end: THREE.Vector3, team: Team, speed = 240): void {
     const direction = end.clone().sub(origin);
     const distance = direction.length();
     if (distance < .5) return;
@@ -258,7 +258,7 @@ export class Battle {
     mesh.scale.set(1, 1, 1.2);
     mesh.visible = true;
     this.scene.add(mesh);
-    this.bolts.push({ mesh, position: origin.clone(), velocity: direction.multiplyScalar(240), team, damage: 0, ttl: distance / 240, fromPlayer: true, whizzed: true });
+    this.bolts.push({ mesh, position: origin.clone(), velocity: direction.multiplyScalar(speed), team, damage: 0, ttl: distance / speed, fromPlayer: true, whizzed: true });
   }
 
   damageActor(actor: Actor, amount: number, direction: THREE.Vector3, byPlayer: boolean, headshot: boolean): void {

@@ -36,7 +36,7 @@ function materials(): Palette {
   if (palette) return palette;
   const tan = grimeTextures(301, [196, 174, 128], 1.3);
   const steel = grimeTextures(317, [104, 116, 132], 1);
-  const white = grimeTextures(331, [226, 230, 228], .9);
+  const white = grimeTextures(331, [226, 230, 228], .3);
   palette = {
     b1: new THREE.MeshStandardMaterial({ ...tan, metalness: .45, roughness: 1 }),
     b1Dark: new THREE.MeshStandardMaterial({ color: 0x4b4438, metalness: .75, roughness: .45 }),
@@ -195,7 +195,9 @@ function buildClone(rank: number): Rig {
   const pelvis = b.joint(root, 0, hipHeight, 0);
   b.part(pelvis, new RoundedBoxGeometry(.36, .13, .24, 2, .04), p.suit, 0, 0, 0);
   b.part(pelvis, new RoundedBoxGeometry(.15, .14, .05, 1, .02), p.armor, 0, -.05, .12);
-  b.part(pelvis, new RoundedBoxGeometry(.38, .06, .25, 1, .02), p.armor, 0, .04, 0);
+  b.part(pelvis, new RoundedBoxGeometry(.38, .065, .25, 1, .02), p.gun, 0, .04, 0);
+  for (const x of [-.13, -.05, .05, .13]) b.part(pelvis, new RoundedBoxGeometry(.06, .07, .04, 1, .012), p.armor, x, .04, -.13);
+  b.part(pelvis, new RoundedBoxGeometry(.07, .05, .02, 1, .01), p.armor, 0, .045, .128);
   const hips: THREE.Group[] = [], knees: THREE.Group[] = [];
   for (const s of [-1, 1]) {
     const hip = b.joint(pelvis, s * .1, -.04, 0);
@@ -216,13 +218,21 @@ function buildClone(rank: number): Rig {
   if (accent) b.part(spine, new THREE.BoxGeometry(.2, .05, .02), accent, .08, .46, .13);
   b.part(spine, cyl(.06, .07, .08, 10), p.suit, 0, .58, 0);
   const head = b.joint(spine, 0, .7, .0);
-  const helmet = b.part(head, new THREE.SphereGeometry(.14, 18, 12), p.armor, 0, .03, 0);
-  helmet.scale.set(1, 1.08, 1.1);
-  b.part(head, new RoundedBoxGeometry(.2, .12, .12, 2, .04), p.armor, 0, -.06, .05);
-  b.part(head, new THREE.BoxGeometry(.18, .04, .03), p.visor, 0, .02, .145);
-  b.part(head, new THREE.BoxGeometry(.045, .1, .03), p.visor, 0, -.03, .155);
-  b.part(head, new THREE.BoxGeometry(.012, .07, .2), accent ?? p.armor, 0, .17, .01);
-  for (const s of [-1, 1]) b.part(head, cyl(.035, .035, .03, 10), p.armor, s * .145, .0, 0, 0, 0, Math.PI / 2);
+  // Phase I helmet: tall dome, flat face plate with T-visor, brow ridge, crest fin, cheek plates.
+  const dome = [[.128, -.12], [.138, -.06], [.144, .0], [.142, .06], [.128, .11], [.1, .15], [.062, .175], [.022, .186], [0, .188]]
+    .map(([r, y]) => new THREE.Vector2(r, y));
+  const helmet = b.part(head, new THREE.LatheGeometry(dome, 20), p.armor, 0, .02, 0);
+  helmet.scale.set(1, 1, 1.12);
+  b.part(head, new RoundedBoxGeometry(.205, .19, .06, 2, .025), p.armor, 0, -.035, .118);
+  b.part(head, new RoundedBoxGeometry(.21, .025, .04, 1, .01), p.armor, 0, .062, .14);
+  b.part(head, new THREE.BoxGeometry(.172, .036, .02), p.visor, 0, .028, .15);
+  b.part(head, new THREE.BoxGeometry(.044, .1, .02), p.visor, 0, -.035, .15);
+  for (const x of [-.03, -.01, .01, .03]) b.part(head, new THREE.BoxGeometry(.008, .03, .012), p.visor, x, -.105, .145);
+  b.part(head, new THREE.BoxGeometry(.012, .055, .22), accent ?? p.armor, 0, .205, -.005);
+  for (const s of [-1, 1]) {
+    b.part(head, cyl(.034, .034, .02, 12), p.armor, s * .148, .0, -.01, 0, 0, Math.PI / 2);
+    b.part(head, new RoundedBoxGeometry(.04, .1, .1, 1, .015), p.armor, s * .115, -.085, .07, 0, s * .35, 0);
+  }
   const shoulders: THREE.Group[] = [], elbows: THREE.Group[] = [];
   for (const s of [-1, 1]) {
     const shoulder = b.joint(spine, s * .26, .5, 0);

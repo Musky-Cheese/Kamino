@@ -12,7 +12,6 @@ export class GameAudio {
   private brown!: AudioBuffer;
   private readonly listener = new THREE.Vector3();
   private readonly right = new THREE.Vector3(1, 0, 0);
-  private distantTimer = 2;
   private heartbeatTimer = 0;
   volume = .8;
 
@@ -307,6 +306,40 @@ export class GameAudio {
     }
   }
 
+  /** Starfighter passing overhead: a falling engine whine over a rushing roar. */
+  flyby(position: THREE.Vector3): void {
+    const out = this.spatial(position, 220, .35);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const roar = this.noiseSource(this.brown);
+    const band = ctx.createBiquadFilter();
+    band.type = "bandpass";
+    band.Q.value = .9;
+    band.frequency.setValueAtTime(1400, t);
+    band.frequency.exponentialRampToValueAtTime(260, t + 2.2);
+    roar.connect(band);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(.0001, t);
+    gain.gain.exponentialRampToValueAtTime(1.1, t + .7);
+    gain.gain.exponentialRampToValueAtTime(.0001, t + 2.4);
+    band.connect(gain).connect(out);
+    roar.start(t, Math.random()); roar.stop(t + 2.5);
+    const whine = ctx.createOscillator();
+    whine.type = "sawtooth";
+    whine.frequency.setValueAtTime(820, t);
+    whine.frequency.exponentialRampToValueAtTime(330, t + 2);
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass"; lp.frequency.value = 1800;
+    whine.connect(lp);
+    const wg = ctx.createGain();
+    wg.gain.setValueAtTime(.0001, t);
+    wg.gain.exponentialRampToValueAtTime(.08, t + .6);
+    wg.gain.exponentialRampToValueAtTime(.0001, t + 2.1);
+    lp.connect(wg).connect(out);
+    whine.start(t); whine.stop(t + 2.2);
+  }
+
   /** B1 "Roger, roger." – a glottal buzz through moving formant filters. */
   rogerRoger(position: THREE.Vector3): void {
     const out = this.spatial(position, 35, .3);
@@ -383,20 +416,9 @@ export class GameAudio {
     wind.start(); windLfo.start();
   }
 
-  /** Distant battle elsewhere in Tipoca City, and a heartbeat when hurt. */
-  update(delta: number, health: number, inCombat: boolean): void {
+  /** Heartbeat when badly hurt. (Distant battle sounds are driven by the game's ambient battle.) */
+  update(delta: number, health: number): void {
     if (!this.ready) return;
-    this.distantTimer -= delta;
-    if (this.distantTimer <= 0) {
-      this.distantTimer = .35 + Math.random() * (inCombat ? 2.2 : 1.2);
-      const angle = Math.random() * Math.PI * 2;
-      const where = this.listener.clone().add(new THREE.Vector3(Math.cos(angle) * 140, 10, Math.sin(angle) * 140));
-      if (Math.random() < .12) this.explosion(where, .7);
-      else {
-        const burst = 1 + Math.floor(Math.random() * 3);
-        for (let i = 0; i < burst; i++) setTimeout(() => this.blaster(Math.random() < .5 ? "droid" : "clone", where), i * 140);
-      }
-    }
     if (health < 35 && health > 0) {
       this.heartbeatTimer -= delta;
       if (this.heartbeatTimer <= 0) {
