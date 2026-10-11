@@ -4,12 +4,15 @@ A non-commercial, fan-made first-person browser game prototype inspired by the B
 
 **Play:** https://musky-cheese.github.io/Kamino/
 
-## Phase One
+## Phase Two
 
 - First-person movement and mouse look
 - Compact Kamino access corridor and layered circular rain courtyard
 - DC-15S-style blaster with shooting, hit feedback, ammo, and reloads
-- Five low-poly droids with pursuit and ranged combat
+- Three escalating battle-droid waves with pursuit and ranged combat
+- Two AI clone allies who advance and return fire
+- Procedural blaster, hit, reload, damage, and thunder audio
+- Sprint FOV, movement bob, weapon sway, automatic fire, and destruction sparks
 - Health, victory, defeat, pause, and restart flow
 - Desktop browser support
 
@@ -37,6 +40,6 @@ Build the production version with `pnpm build`.
 
 ## Project status
 
-Phase One is a single-player vertical slice built with TypeScript, Three.js, and Vite. The previous top-down multiplayer experiment is preserved at Git tag `prototype-top-down-v0.1`.
+Phase Two is a short single-player battle built with TypeScript, Three.js, and Vite. The previous top-down multiplayer experiment is preserved at Git tag `prototype-top-down-v0.1`.
 
 This project is unofficial and is not affiliated with or endorsed by Lucasfilm, Disney, or Electronic Arts. It uses original procedural geometry and no official game assets.

@@ -15,25 +15,37 @@ type Enemy = {
   walkPhase: number;
 };
 
+type Ally = {
+  group: THREE.Group;
+  arms: THREE.Group[];
+  shotTimer: number;
+  walkPhase: number;
+};
+
 type Tracer = { line: THREE.Line; ttl: number };
+type Spark = { mesh: THREE.Mesh; velocity: THREE.Vector3; ttl: number };
 
 export class KaminoGame {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.05, 180);
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
   private readonly controls: PointerLockControls;
-  private readonly clock = new THREE.Clock();
+  private readonly timer = new THREE.Timer();
   private readonly raycaster = new THREE.Raycaster();
   private readonly keys = new Set<string>();
   private readonly blockers: THREE.Box2[] = [];
   private readonly shootSurfaces: THREE.Object3D[] = [];
   private readonly enemies: Enemy[] = [];
+  private readonly allies: Ally[] = [];
   private readonly tracers: Tracer[] = [];
+  private readonly sparks: Spark[] = [];
   private readonly rain: THREE.Points;
   private readonly weapon = new THREE.Group();
   private readonly muzzleLight = new THREE.PointLight(0x61cfff, 0, 4);
   private started = false;
   private ended = false;
+  private firing = false;
+  private moving = false;
   private health = 100;
   private ammo = MAGAZINE_SIZE;
   private reloading = false;
@@ -42,12 +54,19 @@ export class KaminoGame {
   private weaponKick = 0;
   private lightningTimer = 2 + Math.random() * 5;
   private lightningStrength = 0;
+  private wave = 1;
+  private readonly maxWaves = 3;
+  private waveTransition = false;
+  private nextEnemyId = 0;
+  private bobTime = 0;
+  private audio?: AudioContext;
   private readonly stormLight = new THREE.DirectionalLight(0xb9e7ff, 1.2);
 
   private readonly menu = document.querySelector<HTMLElement>("#menu")!;
   private readonly hud = document.querySelector<HTMLElement>("#hud")!;
   private readonly result = document.querySelector<HTMLElement>("#result")!;
   private readonly enemyCount = document.querySelector<HTMLElement>("#enemies")!;
+  private readonly waveText = document.querySelector<HTMLElement>("#wave")!;
   private readonly healthText = document.querySelector<HTMLElement>("#health")!;
   private readonly healthBar = document.querySelector<HTMLElement>("#health-bar")!;
   private readonly ammoText = document.querySelector<HTMLElement>("#ammo")!;
@@ -62,7 +81,7 @@ export class KaminoGame {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.root.prepend(this.renderer.domElement);
     this.controls = new PointerLockControls(this.camera, this.renderer.domElement);
     this.rain = this.createRain();
@@ -76,7 +95,8 @@ export class KaminoGame {
     this.buildLighting();
     this.buildWorld();
     this.buildWeapon();
-    this.spawnEnemies();
+    this.spawnAllies();
+    this.spawnWave();
     this.bindEvents();
     this.updateHud();
     this.renderer.setAnimationLoop(() => this.animate());
@@ -271,9 +291,16 @@ export class KaminoGame {
     this.scene.add(this.camera);
   }
 
-  private spawnEnemies(): void {
-    const positions: Array<[number, number]> = [[-5.8, -9.3], [5.2, -6.8], [-10.5, 1.7], [10.6, 8.7], [1.2, -5.8]];
-    positions.forEach(([x, z], id) => {
+  private spawnWave(): void {
+    const spawnPoints: Array<[number, number]> = [
+      [-5.8, -9.3], [5.2, -7.2], [-12.2, -1.5], [11.8, 8.8], [1.2, -9.8],
+      [-9.4, -10.2], [10.5, 1.4], [-12, 9.6], [7.5, -11.4],
+    ];
+    const count = 3 + this.wave;
+    const offset = (this.wave * 2) % spawnPoints.length;
+    for (let index = 0; index < count; index++) {
+      const [x, z] = spawnPoints[(index + offset) % spawnPoints.length];
+      const id = this.nextEnemyId++;
       const enemy = this.createDroid(id);
       enemy.group.position.set(x, 0, z);
       enemy.group.rotation.y = Math.random() * Math.PI * 2;
@@ -281,7 +308,54 @@ export class KaminoGame {
       this.enemies.push(enemy);
       this.scene.add(enemy.group);
       this.shootSurfaces.push(...enemy.hitMeshes);
+    }
+    this.waveTransition = false;
+    this.updateHud();
+  }
+
+  private spawnAllies(): void {
+    [[-1.65, 9.3], [1.65, 9.6]].forEach(([x, z], index) => {
+      const ally = this.createClone(index);
+      ally.group.position.set(x, 0, z);
+      this.allies.push(ally);
+      this.scene.add(ally.group);
     });
+  }
+
+  private createClone(index: number): Ally {
+    const group = new THREE.Group();
+    const armor = new THREE.MeshStandardMaterial({ color: 0xdce6e8, metalness: .34, roughness: .36 });
+    const blue = new THREE.MeshStandardMaterial({ color: index ? 0x347ba4 : 0x285f94, metalness: .48, roughness: .32 });
+    const black = new THREE.MeshStandardMaterial({ color: 0x101820, metalness: .7, roughness: .35 });
+    const arms: THREE.Group[] = [];
+    const part = (geometry: THREE.BufferGeometry, material: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D = group) => {
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(x, y, z);
+      mesh.castShadow = true;
+      parent.add(mesh);
+      return mesh;
+    };
+    part(new THREE.BoxGeometry(.52, .7, .3), armor, 0, 1.35, 0);
+    part(new THREE.BoxGeometry(.38, .08, .32), blue, 0, 1.5, -.02);
+    const helmet = part(new THREE.SphereGeometry(.27, 10, 7), armor, 0, 1.93, 0);
+    helmet.scale.set(1, 1.08, .9);
+    part(new THREE.BoxGeometry(.25, .08, .03), black, 0, 1.98, -.24);
+    part(new THREE.BoxGeometry(.08, .2, .04), blue, 0, 1.82, -.24);
+    [-.17, .17].forEach((x) => {
+      part(new THREE.CylinderGeometry(.075, .085, .82, 8), armor, x, .56, 0);
+      part(new THREE.BoxGeometry(.19, .1, .32), black, x, .09, -.07);
+    });
+    [-1, 1].forEach((side) => {
+      const arm = new THREE.Group();
+      arm.position.set(side * .38, 1.57, 0);
+      const limb = part(new THREE.CylinderGeometry(.065, .08, .66, 8), armor, 0, -.28, 0, arm);
+      limb.rotation.z = side * .14;
+      group.add(arm);
+      arms.push(arm);
+    });
+    const rifle = part(new THREE.BoxGeometry(.1, .1, .78), black, .24, 1.28, -.34);
+    rifle.rotation.x = -.2;
+    return { group, arms, shotTimer: .4 + index * .5, walkPhase: index * Math.PI };
   }
 
   private createDroid(id: number): Enemy {
@@ -326,6 +400,7 @@ export class KaminoGame {
 
   private bindEvents(): void {
     document.querySelector<HTMLButtonElement>("#start")!.addEventListener("click", () => {
+      this.initializeAudio();
       this.started = true;
       this.controls.lock();
     });
@@ -351,8 +426,12 @@ export class KaminoGame {
     });
     addEventListener("keyup", (event) => this.keys.delete(event.code));
     addEventListener("mousedown", (event) => {
-      if (event.button === 0 && this.controls.isLocked) this.fire();
+      if (event.button === 0 && this.controls.isLocked) {
+        this.firing = true;
+        this.fire();
+      }
     });
+    addEventListener("mouseup", (event) => { if (event.button === 0) this.firing = false; });
     addEventListener("resize", () => {
       this.camera.aspect = innerWidth / innerHeight;
       this.camera.updateProjectionMatrix();
@@ -361,13 +440,17 @@ export class KaminoGame {
   }
 
   private animate(): void {
-    const delta = Math.min(this.clock.getDelta(), .05);
+    this.timer.update();
+    const delta = Math.min(this.timer.getDelta(), .05);
     if (this.started && !this.ended && this.controls.isLocked) {
       this.updatePlayer(delta);
       this.updateEnemies(delta);
+      this.updateAllies(delta);
+      if (this.firing) this.fire();
     }
     this.updateAtmosphere(delta);
     this.updateTracers(delta);
+    this.updateSparks(delta);
     this.updateWeapon(delta);
     this.renderer.render(this.scene, this.camera);
   }
@@ -376,14 +459,22 @@ export class KaminoGame {
     const speed = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") ? 7.4 : 4.7;
     let forward = Number(this.keys.has("KeyW")) - Number(this.keys.has("KeyS"));
     let right = Number(this.keys.has("KeyD")) - Number(this.keys.has("KeyA"));
-    if (!forward && !right) return;
+    this.moving = Boolean(forward || right);
+    const sprinting = this.moving && (this.keys.has("ShiftLeft") || this.keys.has("ShiftRight"));
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, sprinting ? 77 : 72, delta * 7);
+    this.camera.updateProjectionMatrix();
+    if (!forward && !right) {
+      this.camera.position.y = THREE.MathUtils.lerp(this.camera.position.y, PLAYER_HEIGHT, delta * 10);
+      return;
+    }
     const length = Math.hypot(forward, right);
     forward /= length;
     right /= length;
     const old = this.camera.position.clone();
     this.controls.moveForward(forward * speed * delta);
     this.controls.moveRight(right * speed * delta);
-    this.camera.position.y = PLAYER_HEIGHT;
+    this.bobTime += delta * (sprinting ? 12 : 8);
+    this.camera.position.y = PLAYER_HEIGHT + Math.sin(this.bobTime) * .035;
     if (!this.isWalkable(this.camera.position.x, this.camera.position.z)) this.camera.position.copy(old);
   }
 
@@ -403,6 +494,7 @@ export class KaminoGame {
     this.ammo--;
     this.weaponKick = 1;
     this.muzzleLight.intensity = 4;
+    this.playTone(920, 150, "sawtooth", .045, 210);
     this.updateHud();
 
     this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
@@ -420,6 +512,7 @@ export class KaminoGame {
       const enemy = this.enemies[enemyId];
       if (enemy?.alive) {
         enemy.hp -= 40;
+        this.playTone(1350, 45, "square", .025, 800);
         this.flashHitMarker();
         if (enemy.hp <= 0) this.killEnemy(enemy);
       }
@@ -430,11 +523,13 @@ export class KaminoGame {
   private reload(): void {
     if (this.reloading || this.ammo === MAGAZINE_SIZE || this.ended) return;
     this.reloading = true;
+    this.playTone(180, 80, "square", .018, 120);
     this.showMessage("Reloading…", 1.15);
     setTimeout(() => {
       if (this.ended) return;
       this.ammo = MAGAZINE_SIZE;
       this.reloading = false;
+      this.playTone(240, 90, "square", .02, 420);
       this.updateHud();
     }, 1150);
   }
@@ -462,6 +557,44 @@ export class KaminoGame {
     }
   }
 
+  private updateAllies(delta: number): void {
+    const liveEnemies = this.enemies.filter((enemy) => enemy.alive);
+    if (!liveEnemies.length) return;
+    for (const ally of this.allies) {
+      let target = liveEnemies[0];
+      let nearest = ally.group.position.distanceToSquared(target.group.position);
+      for (const enemy of liveEnemies.slice(1)) {
+        const distance = ally.group.position.distanceToSquared(enemy.group.position);
+        if (distance < nearest) { nearest = distance; target = enemy; }
+      }
+      const direction = new THREE.Vector3().subVectors(target.group.position, ally.group.position);
+      const distance = Math.hypot(direction.x, direction.z);
+      ally.group.rotation.y = Math.atan2(direction.x, direction.z);
+      ally.walkPhase += delta * 5;
+      ally.arms.forEach((arm, index) => arm.rotation.x = -.65 + Math.sin(ally.walkPhase + index * Math.PI) * .05);
+      if (distance > 10) {
+        const step = direction.setY(0).normalize().multiplyScalar(delta * 1.15);
+        const nextX = ally.group.position.x + step.x;
+        const nextZ = ally.group.position.z + step.z;
+        if (this.isWalkable(nextX, nextZ)) ally.group.position.set(nextX, 0, nextZ);
+      }
+      ally.shotTimer -= delta;
+      if (distance < 24 && ally.shotTimer <= 0) {
+        ally.shotTimer = .65 + Math.random() * .65;
+        const origin = ally.group.position.clone().add(new THREE.Vector3(.2, 1.35, 0));
+        const destination = target.group.position.clone().add(new THREE.Vector3(0, 1.3, 0));
+        if (Math.random() < .7) {
+          target.hp -= 24;
+          if (target.hp <= 0) this.killEnemy(target);
+        } else {
+          destination.add(new THREE.Vector3((Math.random() - .5) * 2.6, Math.random() * 1.2, (Math.random() - .5) * 2.6));
+        }
+        this.addTracer(origin, destination, 0x4ccfff, .1);
+        this.playTone(720, 110, "sawtooth", .016, 180);
+      }
+    }
+  }
+
   private enemyFire(enemy: Enemy, distance: number): void {
     const origin = enemy.group.position.clone().add(new THREE.Vector3(0, 1.35, 0));
     const target = this.camera.position.clone();
@@ -469,18 +602,21 @@ export class KaminoGame {
     const hits = Math.random() < hitChance;
     if (!hits) target.add(new THREE.Vector3((Math.random() - .5) * 4, (Math.random() - .5) * 2, (Math.random() - .5) * 4));
     this.addTracer(origin, target, 0xff392e, .16);
+    this.playTone(240, 130, "sawtooth", .022, 90);
     if (hits) this.takeDamage(9);
   }
 
   private takeDamage(amount: number): void {
     this.health = Math.max(0, this.health - amount);
     this.damageFlash.classList.add("show");
+    this.playTone(90, 160, "square", .045, 55);
     setTimeout(() => this.damageFlash.classList.remove("show"), 100);
     this.updateHud();
     if (this.health <= 0) this.finish(false);
   }
 
   private killEnemy(enemy: Enemy): void {
+    if (!enemy.alive) return;
     enemy.alive = false;
     enemy.group.rotation.z = -1.45;
     enemy.group.position.y = .18;
@@ -489,10 +625,26 @@ export class KaminoGame {
       if (index >= 0) this.shootSurfaces.splice(index, 1);
       mesh.userData.enemyId = undefined;
     });
+    this.spawnSparks(enemy.group.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 0xff8a38);
     const alive = this.enemies.filter((item) => item.alive).length;
     this.updateHud();
-    this.showMessage(alive ? `Droid down · ${alive} remaining` : "Area clear", 1.4);
-    if (alive === 0) setTimeout(() => this.finish(true), 700);
+    this.showMessage(alive ? `Droid down · ${alive} remaining` : "Wave clear", 1.4);
+    if (alive === 0 && !this.waveTransition) {
+      this.waveTransition = true;
+      if (this.wave >= this.maxWaves) {
+        setTimeout(() => this.finish(true), 900);
+      } else {
+        this.wave++;
+        this.health = Math.min(100, this.health + 18);
+        this.ammo = MAGAZINE_SIZE;
+        this.updateHud();
+        setTimeout(() => {
+          if (this.ended) return;
+          this.showMessage(`Wave ${this.wave} incoming`, 2);
+          this.spawnWave();
+        }, 1800);
+      }
+    }
   }
 
   private finish(victory: boolean): void {
@@ -502,9 +654,9 @@ export class KaminoGame {
     this.hud.classList.add("hidden");
     this.menu.classList.add("hidden");
     document.querySelector<HTMLElement>("#result-kicker")!.textContent = victory ? "Mission complete" : "Mission failed";
-    document.querySelector<HTMLElement>("#result-title")!.textContent = victory ? "PLATFORM SECURED" : "CLONE DOWN";
+    document.querySelector<HTMLElement>("#result-title")!.textContent = victory ? "COURTYARD SECURED" : "CLONE DOWN";
     document.querySelector<HTMLElement>("#result-copy")!.textContent = victory
-      ? "The droid strike team has been neutralized. Tipoca City's central courtyard is secure—for now."
+      ? "All three droid waves have been neutralized. Tipoca City's central courtyard is secure—for now."
       : "The droids broke through the rain courtyard. Regroup and try the mission again.";
     this.result.classList.remove("hidden");
   }
@@ -530,6 +682,37 @@ export class KaminoGame {
     }
   }
 
+  private spawnSparks(origin: THREE.Vector3, color: number): void {
+    const material = new THREE.MeshBasicMaterial({ color });
+    for (let i = 0; i < 12; i++) {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(.025, .025, .18), material.clone());
+      mesh.position.copy(origin);
+      mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      this.scene.add(mesh);
+      this.sparks.push({
+        mesh,
+        velocity: new THREE.Vector3((Math.random() - .5) * 4.5, 1.5 + Math.random() * 3.2, (Math.random() - .5) * 4.5),
+        ttl: .35 + Math.random() * .3,
+      });
+    }
+  }
+
+  private updateSparks(delta: number): void {
+    for (let i = this.sparks.length - 1; i >= 0; i--) {
+      const spark = this.sparks[i];
+      spark.velocity.y -= delta * 8;
+      spark.mesh.position.addScaledVector(spark.velocity, delta);
+      spark.mesh.scale.z = Math.max(.05, spark.ttl * 2.2);
+      spark.ttl -= delta;
+      if (spark.ttl <= 0) {
+        this.scene.remove(spark.mesh);
+        spark.mesh.geometry.dispose();
+        (spark.mesh.material as THREE.Material).dispose();
+        this.sparks.splice(i, 1);
+      }
+    }
+  }
+
   private updateAtmosphere(delta: number): void {
     const positions = this.rain.geometry.attributes.position as THREE.BufferAttribute;
     for (let i = 0; i < positions.count; i++) {
@@ -544,6 +727,7 @@ export class KaminoGame {
     if (this.lightningTimer <= 0) {
       this.lightningStrength = 4.5;
       this.lightningTimer = 3 + Math.random() * 7;
+      this.playTone(48, 480, "sine", .05, 31);
     }
     this.lightningStrength = Math.max(0, this.lightningStrength - delta * 18);
     this.stormLight.intensity = 1.2 + this.lightningStrength;
@@ -556,8 +740,32 @@ export class KaminoGame {
   private updateWeapon(delta: number): void {
     this.weaponKick = Math.max(0, this.weaponKick - delta * 9);
     this.weapon.position.z = -.7 + this.weaponKick * .09;
+    const sway = this.moving ? Math.sin(this.bobTime * .5) * .012 : 0;
+    this.weapon.position.x = THREE.MathUtils.lerp(this.weapon.position.x, .38 + sway, delta * 9);
+    this.weapon.position.y = THREE.MathUtils.lerp(this.weapon.position.y, -.33 + Math.abs(sway) * .7, delta * 9);
     this.weapon.rotation.x = -.08 + this.weaponKick * .08;
     this.muzzleLight.intensity = Math.max(0, this.muzzleLight.intensity - delta * 35);
+  }
+
+  private initializeAudio(): void {
+    if (!this.audio) this.audio = new AudioContext();
+    if (this.audio.state === "suspended") void this.audio.resume();
+  }
+
+  private playTone(startFrequency: number, durationMs: number, type: OscillatorType, volume: number, endFrequency: number): void {
+    if (!this.audio || this.audio.state !== "running") return;
+    const now = this.audio.currentTime;
+    const duration = durationMs / 1000;
+    const oscillator = this.audio.createOscillator();
+    const gain = this.audio.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(startFrequency, now);
+    oscillator.frequency.exponentialRampToValueAtTime(Math.max(1, endFrequency), now + duration);
+    gain.gain.setValueAtTime(volume, now);
+    gain.gain.exponentialRampToValueAtTime(.0001, now + duration);
+    oscillator.connect(gain).connect(this.audio.destination);
+    oscillator.start(now);
+    oscillator.stop(now + duration);
   }
 
   private flashHitMarker(): void {
@@ -573,6 +781,7 @@ export class KaminoGame {
 
   private updateHud(): void {
     this.enemyCount.textContent = String(this.enemies.filter((enemy) => enemy.alive).length);
+    this.waveText.textContent = `WAVE ${this.wave} / ${this.maxWaves}`;
     this.healthText.textContent = String(this.health);
     this.healthBar.style.width = `${this.health}%`;
     this.healthBar.style.background = this.health < 35 ? "#ff5448" : "linear-gradient(90deg, #5bd2ff, #d7f8ff)";

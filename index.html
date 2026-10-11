@@ -9,9 +9,9 @@
   <body>
     <main id="game" aria-label="Kamino first-person game">
       <section id="menu" class="panel">
-        <p class="eyebrow">Phase one · unofficial fan-made prototype</p>
+        <p class="eyebrow">Phase two · unofficial fan-made prototype</p>
         <h1>KAMINO</h1>
-        <p class="mission-copy">Tipoca City is under attack. Enter the rain courtyard and eliminate the droid strike team before it reaches the cloning facilities.</p>
+        <p class="mission-copy">Tipoca City is under attack. Join two clone troopers in the rain courtyard and repel three waves of battle droids.</p>
         <button id="start" type="button">Begin mission</button>
         <div class="controls" aria-label="Controls">
           <span><kbd>WASD</kbd> Move</span><span><kbd>Mouse</kbd> Look</span>
@@ -22,7 +22,7 @@
       </section>
 
       <section id="hud" class="hidden" aria-live="polite">
-        <div class="objective"><small>MISSION</small><strong>Secure the rain courtyard</strong></div>
+        <div class="objective"><small id="wave">WAVE 1 / 3</small><strong>Secure the rain courtyard</strong></div>
         <div class="enemy-count"><small>DROIDS</small><strong id="enemies">5</strong></div>
         <div id="reticle" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b></div>
         <div id="hit-marker" aria-hidden="true">×</div>
@@ -33,7 +33,7 @@
 
       <section id="result" class="panel hidden">
         <p class="eyebrow" id="result-kicker">Mission complete</p>
-        <h2 id="result-title">PLATFORM SECURED</h2>
+        <h2 id="result-title">COURTYARD SECURED</h2>
         <p id="result-copy">The droid strike team has been neutralized.</p>
         <button id="restart" type="button">Run mission again</button>
       </section>
