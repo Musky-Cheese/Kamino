@@ -28,6 +28,10 @@ const SOURCES = {
   // Rigid parts parented to bone nodes: keep the hierarchy intact (as for all skinned characters).
   b1: { dir: "battle_droid_b1", textureSize: 2048, rigid: true },
   b2: { dir: "b2", textureSize: 1024, rigid: true },
+  // Dogfight starfighters, seen at a distance: small textures, the ARC-170 thinned out.
+  arc170: { dir: "arc170", textureSize: 1024, simplifyRatio: .5 },
+  v19: { dir: "v19_torrent", textureSize: 1024 },
+  trifighter: { dir: "tri_fighter", textureSize: 1024 },
   // Animation library: skeleton and the clips the game uses, no mesh.
   anims: {
     file: "ual/Universal Animation Library[Standard]/Unreal-Godot/UAL1_Standard.glb",

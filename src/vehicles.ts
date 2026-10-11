@@ -80,6 +80,82 @@ function buildProceduralGunship(m: Materials): Gunship {
   return { group: g, blinkers, searchlight, gun: anchor(g, 0, 1, -7.5) };
 }
 
+/**
+ * Republic ARC-170 style starfighter, built from primitives: long nose, split wings with heavy cannons
+ * along the roots, twin tail fins and two engines. Nose toward -Z, about 13 m long.
+ */
+export function buildRepublicFighter(m: Materials): { group: THREE.Group; guns: THREE.Object3D[] } {
+  const g = new THREE.Group();
+  const cyl = (r0: number, r1: number, h: number, seg = 12) => new THREE.CylinderGeometry(r0, r1, h, seg).rotateX(Math.PI / 2);
+  const engineGlow = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 1.6, .7), toneMapped: false });
+  mesh(g, taperedBox(1.7, 1.2, 8, .5, .65), m.repWhite, 0, 0, 0);
+  mesh(g, taperedBox(1.05, .8, 3, .25, .35), m.repWhite, 0, -.05, -5.5);
+  mesh(g, new THREE.SphereGeometry(.55, 12, 8), m.canopy, 0, .55, -2.6).scale.set(1, .7, 2.2);
+  mesh(g, new THREE.SphereGeometry(.4, 10, 6), m.canopy, 0, .5, 2.4).scale.set(1, .7, 1.4);
+  // Command stripes along the nose.
+  for (const sx of [-1, 1]) mesh(g, new THREE.BoxGeometry(.06, .5, 3.6), m.repRed, sx * .62, .05, -3.4, 0, sx * .06);
+  const guns: THREE.Object3D[] = [];
+  for (const sx of [-1, 1]) {
+    // Split S-foil wings, slightly open.
+    for (const sy of [-1, 1]) {
+      const wing = mesh(g, taperedBox(5.6, .14, 2.8, 1, .8, 1, 1), m.repWhite, sx * 3.9, sy * .22, 1.2, 0, 0, sx * sy * .07);
+      wing.castShadow = false;
+      mesh(g, new THREE.BoxGeometry(1.4, .16, 2.4), m.repRed, sx * 6.2, sy * .22 + sx * sy * .17, 1.25, 0, 0, sx * sy * .07);
+    }
+    // Wing-root laser cannons.
+    mesh(g, cyl(.32, .36, 5.2), m.repWhite, sx * 1.75, 0, -2.2);
+    mesh(g, cyl(.13, .13, 2.2), m.sepDark, sx * 1.75, 0, -5.8);
+    guns.push(anchor(g, sx * 1.75, 0, -7));
+    // Tail fins.
+    mesh(g, taperedBox(.14, 2.4, 2.2, 1, .7), m.repWhite, sx * 1.05, 1.35, 3.3, 0, 0, sx * -.18);
+    mesh(g, new THREE.BoxGeometry(.16, .5, 1.4), m.repRed, sx * 1.25, 2.3, 3.5, 0, 0, sx * -.18);
+    // Engines.
+    mesh(g, cyl(.42, .5, 2.2), m.sepDark, sx * .62, -.1, 4);
+    mesh(g, new THREE.CircleGeometry(.38, 14), engineGlow, sx * .62, -.1, 5.12);
+  }
+  g.traverse((object) => { if (object instanceof THREE.Mesh) { object.castShadow = false; object.receiveShadow = false; } });
+  return { group: g, guns };
+}
+
+type Fighter = { group: THREE.Group; guns: THREE.Object3D[] };
+
+/**
+ * A loaded starfighter turned nose toward -Z and sized to `length`, with gun anchors placed as fractions
+ * of its bounds: x and y in half-widths from the centre, z along the length from the nose (0) to the tail (1).
+ */
+function loadedFighter(name: "arc170" | "v19" | "trifighter", length: number, guns: Array<[number, number, number]>): Fighter {
+  const group = instantiate(name, { rotation: [0, Math.PI, 0], length, centerY: true, shadows: false });
+  const box = new THREE.Box3().setFromObject(group, true);
+  const half = box.getSize(new THREE.Vector3()).multiplyScalar(.5);
+  const center = box.getCenter(new THREE.Vector3());
+  return {
+    group,
+    guns: guns.map(([x, y, z]) => anchor(group, center.x + x * half.x, center.y + y * half.y, box.min.z + z * half.z * 2)),
+  };
+}
+
+/** Republic ARC-170 heavy fighter: wing-tip cannons. */
+export function buildArc170(m: Materials): Fighter {
+  if (!hasModel("arc170")) return buildRepublicFighter(m);
+  return loadedFighter("arc170", 14, [[-.93, -.1, .05], [.93, -.1, .05]]);
+}
+
+/** Republic V-19 Torrent: light, quick interceptor with cannons on its folded wing tips. */
+export function buildV19(m: Materials): Fighter {
+  if (!hasModel("v19")) {
+    const fallback = buildRepublicFighter(m);
+    fallback.group.scale.setScalar(.6);
+    return fallback;
+  }
+  return loadedFighter("v19", 8, [[-.92, -.6, 0], [.92, -.6, 0]]);
+}
+
+/** Separatist droid tri-fighter: three arms, a cannon at each tip, plus the nose gun. */
+export function buildTriFighter(m: Materials): Fighter {
+  if (!hasModel("trifighter")) return buildVulture(m);
+  return loadedFighter("trifighter", 7, [[0, .95, .1], [-.85, -.6, .1], [.85, -.6, .1], [0, 0, 0]]);
+}
+
 /** Separatist vulture droid in flight mode: a narrow body with four blade wings in an X, red photoreceptors. Nose toward -Z. */
 export function buildVulture(m: Materials): { group: THREE.Group; guns: THREE.Object3D[] } {
   if (!hasModel("vulture")) return buildProceduralVulture(m);

@@ -149,6 +149,28 @@ export class Effects {
     this.scorch(position.clone().setY(position.y + .02), new THREE.Vector3(0, 1, 0), 3.2 * scale);
   }
 
+  /** Fireball in open air: no scorch mark, debris sparks fall away. */
+  airburst(position: THREE.Vector3, scale = 1): void {
+    this.flash(position, 0xff8a3a, 1400 * scale, .5, 40 * scale);
+    this.glow(position, new THREE.Color(5, 2.2, .7), 4 * scale, .4, 10 * scale);
+    this.glow(position, new THREE.Color(2, 2.2, 2.4), 2 * scale, .14, 7 * scale);
+    for (let i = 0; i < 8; i++) {
+      const offset = new THREE.Vector3(Math.random() - .5, Math.random() - .5, Math.random() - .5).multiplyScalar(2.4 * scale);
+      this.smoke(position.clone().add(offset), (2 + Math.random() * 2) * scale, 3 + Math.random() * 2, 0x1f2124, .6, .8);
+    }
+    this.sparksAt(position, new THREE.Vector3(0, .3, 0), new THREE.Color(6, 3, 1), 70, 16, 12);
+  }
+
+  /** Wreck hitting the sea: a column of spray. */
+  splash(position: THREE.Vector3, scale = 1): void {
+    this.flash(position.clone().setY(position.y + 3), 0xffa060, 500 * scale, .3, 30 * scale);
+    for (let i = 0; i < 10; i++) {
+      const offset = new THREE.Vector3((Math.random() - .5) * 4, Math.random() * 6, (Math.random() - .5) * 4).multiplyScalar(scale);
+      this.smoke(position.clone().add(offset), (3 + Math.random() * 3) * scale, 2 + Math.random() * 1.5, 0xb8c6cf, 2.5, .6);
+    }
+    this.sparksAt(position, new THREE.Vector3(0, 1, 0), new THREE.Color(1.6, 1.8, 2), 40, 14, 18);
+  }
+
   /** Break a droid into tumbling pieces. */
   shatter(meshes: THREE.Mesh[], impulse: THREE.Vector3, power: number): void {
     for (const mesh of meshes) {

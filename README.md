@@ -71,7 +71,8 @@ Build the production version with `pnpm build`. Add `?test` to the URL to skip t
 | `src/actors.ts` | Rig interface the AI drives; procedural fallback droids and clones; weapon models |
 | `src/characters.ts` | Animated clone / B1 / B2 from the loaded models: clip blending, rifle IK, hit proxies, shatter pieces |
 | `src/retarget.ts` | Bakes animation-library clips onto other skeletons |
-| `src/vehicles.ts` | Gunship, vulture and lander: loaded models placed with lights and gun anchors, procedural fallbacks |
+| `src/airbattle.ts` | The dogfight overhead: fighter AI, bolts, shoot-downs, burning wrecks and crashes |
+| `src/vehicles.ts` | Gunship, starfighters, vulture and lander: loaded models placed with lights and gun anchors, procedural fallbacks |
 | `src/models.ts` | glTF loading (meshopt, WebP) behind the loading screen; fitting models to the game's scale |
 | `src/weapon.ts` | First-person DC-15A |
 | `src/effects.ts` | Sparks, scorch marks, explosions, debris, light pool |
@@ -95,6 +96,9 @@ Third-party models, used under [CC BY 4.0](https://creativecommons.org/licenses/
 | Clone Trooper Phase1 (Shiny) [Updated] (skin binding repaired) | Admiral Tributon | [Sketchfab](https://sketchfab.com/3d-models/clone-trooper-phase1-shiny-updated-aae018747b054186bd48e460b0ad1192) |
 | Battle Droid B1 | Andrés Kuiper | [Sketchfab](https://sketchfab.com/3d-models/battle-droid-b1-3ee39289d86a45cd894f61e269ea10ed) |
 | Super Battle Droid B2 Animated (based on Andrés Kuiper's B2) | Suvalien | [Sketchfab](https://sketchfab.com/3d-models/super-battle-droid-b2-animated-training-a0f947934672450bad323d6438499812) |
+| ARC-170 Starfighter | DrEgguin | [Sketchfab](https://sketchfab.com/3d-models/arc-170-starfighter-b9407262cdf34d37b0720ca6b70469be) |
+| V-19 Torrent Starfighter | A308 Digital | [Sketchfab](https://sketchfab.com/3d-models/v-19-torrent-starfighter-67804739c036405faea16120d31bc65a) |
+| Trade Federation Droid Tri-Fighter | scarlequin | [Sketchfab](https://sketchfab.com/3d-models/trade-federation-droid-tri-fighter-9c06ba9b24144221aa80f56192f485b6) |
 | Universal Animation Library (CC0, retargeted onto the clone and B1) | Quaternius | [quaternius.com](https://quaternius.com/packs/universalanimationlibrary.html) |
 
 Surface textures (all CC0), converted to WebP by `scripts/fetch-textures.mjs`:

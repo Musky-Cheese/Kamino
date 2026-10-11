@@ -4,6 +4,8 @@ import { glowTexture, grimeTextures } from "./textures";
 
 export type ViewState = {
   ads: number;
+  /** 0..1: looking through the scope, so the rifle itself is out of view. */
+  scope: number;
   moving: boolean;
   sprinting: boolean;
   grounded: boolean;
@@ -219,6 +221,7 @@ export class Viewmodel {
       rx -= dip * .5;
     }
     this.root.position.lerp(pos, Math.min(1, delta * 18));
+    this.gun.visible = state.scope < .5;
     this.gun.rotation.x = THREE.MathUtils.lerp(this.gun.rotation.x, rx, Math.min(1, delta * 14));
     this.gun.rotation.y = THREE.MathUtils.lerp(this.gun.rotation.y, ry, Math.min(1, delta * 12));
     this.gun.rotation.z = THREE.MathUtils.lerp(this.gun.rotation.z, rz, Math.min(1, delta * 12));

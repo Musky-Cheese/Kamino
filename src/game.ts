@@ -22,6 +22,7 @@ const FIRE_HAZE = new THREE.Color(1, .42, .12).multiplyScalar(2.5);
 const LAMP_HAZE = new THREE.Color(1, .84, .6).multiplyScalar(.8);
 import { loadModels } from "./models";
 import { loadSurfaces } from "./surfaces";
+import { AirBattle, type Craft } from "./airbattle";
 import { STEP_HEIGHT } from "./navigation";
 import { Viewmodel } from "./weapon";
 import { World } from "./world";
@@ -31,6 +32,8 @@ const CROUCH_EYE = 1.08;
 const PLAYER_RADIUS = .36;
 const MAGAZINE = 50;
 const FIRE_INTERVAL = .118;
+/** Field of view through the DC-15A scope (about 3.7x against the 74° hip view). */
+const SCOPE_FOV = 20;
 const RELOAD_TIME = 1.65;
 const MAX_GRENADES = 4;
 const SQUAD_SIZE = 4;
@@ -59,14 +62,19 @@ const GRADE_SHADER = {
     uAds: { value: 0 },
     uRain: { value: .5 },
     uAspect: { value: 16 / 9 },
+    uScope: { value: 0 },
+    uScopeShift: { value: new THREE.Vector2() },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
     void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float uTime, uDamage, uLowHealth, uFlash, uAds, uRain, uAspect;
+    uniform float uTime, uDamage, uLowHealth, uFlash, uAds, uRain, uAspect, uScope;
+    uniform vec2 uScopeShift;
     varying vec2 vUv;
+    // Scope eyepiece radius, in screen heights.
+    const float SCOPE_R = .46;
     float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233)) + uTime * 7.31) * 43758.5453); }
     float stable(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453); }
 
@@ -99,9 +107,15 @@ const GRADE_SHADER = {
     void main() {
       vec3 rain = visorRain(vUv) * uRain;
       vec2 uv = vUv + rain.xy;
+      // Scope: aspect-corrected position; the eyepiece lags the reticle when you swing or breathe.
+      vec2 sp = (vUv - .5) * vec2(uAspect, 1.);
+      vec2 tube = sp - uScopeShift - vec2(sin(uTime * .9), sin(uTime * 1.6)) * .004 * uScope;
+      float sr = length(tube) / SCOPE_R;
+      // Barrel distortion toward the rim of the lens.
+      uv += (vUv - .5) * .07 * sr * sr * uScope;
       vec2 c = uv - .5;
       float r2 = dot(c, c);
-      float ca = (.0012 + uDamage * .006) * (1. + r2 * 4.);
+      float ca = (.0012 + uDamage * .006) * (1. + r2 * 4.) + pow(min(sr, 1.2), 4.) * .018 * uScope;
       vec3 col;
       col.r = texture2D(tDiffuse, uv + c * ca).r;
       col.g = texture2D(tDiffuse, uv).g;
@@ -115,6 +129,38 @@ const GRADE_SHADER = {
       col = mix(col, vec3(luma), desat);
       col += vec3(.55, .02, 0.) * uLowHealth * smoothstep(.12, .5, r2) * (.55 + .45 * sin(uTime * 7.));
       col *= 1. - smoothstep(.18, .75, r2) * (.55 + uAds * .25);
+      if (uScope > .001) {
+        // The eyepiece closes in from the screen edges as the scope comes up to your eye.
+        float radius = mix(1.25, SCOPE_R, smoothstep(0., 1., uScope));
+        float d = length(tube);
+        float lens = 1. - smoothstep(radius - .014 - fwidth(d), radius, d);
+        col *= mix(1., .45 + .55 * smoothstep(radius, radius * .5, d), uScope);
+        col *= mix(vec3(1.), vec3(.94, 1., 1.05), uScope);
+        col += vec3(.06, .09, .11) * smoothstep(.012, 0., abs(d - radius + .01)) * uScope;
+        col = mix(vec3(.004, .006, .008), col, mix(1., lens, smoothstep(0., .4, uScope)));
+
+        // Duplex reticle: thin cross with range ticks, heavy posts outside, lit centre dot.
+        vec2 q = sp / SCOPE_R;
+        float px = fwidth(q.x);
+        float thin = px * .9;
+        float lineH = 1. - smoothstep(thin, thin + px, abs(q.y));
+        float lineV = 1. - smoothstep(thin, thin + px, abs(q.x));
+        float gap = step(.04, length(q));
+        float cross = max(lineH * step(abs(q.x), .5), lineV * step(abs(q.y), .5)) * gap;
+        float post = .014;
+        float posts = max((1. - smoothstep(post, post + px, abs(q.y))) * step(.5, abs(q.x)),
+                          (1. - smoothstep(post, post + px, abs(q.x))) * step(.5, -q.y));
+        float tx = abs(fract(q.x * 10. + .5) - .5) * .1;
+        float ty = abs(fract(q.y * 10. + .5) - .5) * .1;
+        float ticks = max((1. - smoothstep(thin, thin + px, tx)) * (1. - smoothstep(.016, .016 + px, abs(q.y))) * step(abs(q.x), .45),
+                          (1. - smoothstep(thin, thin + px, ty)) * (1. - smoothstep(.024, .024 + px, abs(q.x))) * step(abs(q.y), .45) * step(q.y, 0.));
+        ticks *= step(.06, length(q));
+        float reticle = max(max(cross, posts), ticks) * lens * smoothstep(.6, 1., uScope);
+        col = mix(col, vec3(.008, .01, .012), reticle * .92);
+        float dot = 1. - smoothstep(.007, .007 + px, length(q));
+        col = mix(col, vec3(1.8, .28, .12), dot * smoothstep(.6, 1., uScope));
+        col += vec3(.5, .06, .02) * smoothstep(.04, 0., length(q)) * .25 * smoothstep(.6, 1., uScope);
+      }
       col += uFlash * vec3(.05, .07, .09);
       col += (hash(vUv * 931.) - .5) * .028;
       gl_FragColor = vec4(col, 1.);
@@ -154,6 +200,7 @@ export class KaminoGame {
   private env!: Environment;
   private effects!: Effects;
   private battle!: Battle;
+  private air!: AirBattle;
 
   // Player state.
   private readonly feet = PLAYER_START.clone();
@@ -169,6 +216,9 @@ export class KaminoGame {
   private firing = false;
   private aiming = false;
   private ads = 0;
+  /** 0..1: eye to the scope. Follows ADS once the rifle is up. */
+  private scope = 0;
+  private readonly scopeSway = new THREE.Vector2();
   private bloomSpread = 0;
   private recoilPitch = 0;
   private grenades = 3;
@@ -259,6 +309,14 @@ export class KaminoGame {
       playerHit: (damage, from) => this.hurt(damage, from),
       nearMiss: (position) => { this.effects.addShake(.08); this.audio.whizz(position); },
       droidHitByPlayer: () => undefined,
+    });
+    this.air = new AirBattle(this.scene, this.materials, this.world, this.battle, this.effects, this.audio, {
+      shotDown: (craft, byPlayer) => this.onCraftDown(craft, byPlayer),
+      crashed: (position, onDeck) => {
+        const distance = position.distanceTo(this.camera.position);
+        if (distance < 140) this.effects.addShake((onDeck ? .9 : .4) * (1 - distance / 140));
+        if (onDeck && this.running && position.distanceTo(this.feet) < 7) this.hurt(45, position);
+      },
     });
     await progress(.75, "Deploying the clone army…");
     this.camera.add(this.viewmodel.root);
@@ -575,11 +633,13 @@ export class KaminoGame {
     } else if (!this.started) this.menuCamera();
 
     this.world.update(delta, this.time);
+    this.air.update(simulating || !this.started ? delta : 0, this.feet);
     this.env.update(delta, this.time, this.camera, this.fog);
     this.effects.update(delta, this.camera);
     this.updateLighting();
     this.viewmodel.update(delta, {
       ads: this.ads,
+      scope: this.scope,
       moving: this.velocity.lengthSq() > .5,
       sprinting: this.isSprinting(),
       grounded: this.grounded,
@@ -590,6 +650,8 @@ export class KaminoGame {
       lookY: this.lookY,
       bob: this.bob,
     });
+    const sway = new THREE.Vector2(THREE.MathUtils.clamp(-this.lookX * .0011, -.05, .05), THREE.MathUtils.clamp(this.lookY * .0011, -.05, .05));
+    this.scopeSway.lerp(sway.multiplyScalar(this.scope), Math.min(1, delta * 9));
     this.lookX = this.lookY = 0;
     this.audio.setListener(this.camera.position, this.camera.quaternion);
     this.audio.update(delta, this.health);
@@ -612,6 +674,8 @@ export class KaminoGame {
     (this.grade.uniforms.uTime as THREE.IUniform).value = this.time;
     (this.grade.uniforms.uFlash as THREE.IUniform).value = flash;
     (this.grade.uniforms.uAds as THREE.IUniform).value = this.ads;
+    (this.grade.uniforms.uScope as THREE.IUniform).value = this.scope;
+    (this.grade.uniforms.uScopeShift.value as THREE.Vector2).copy(this.scopeSway);
     const damage = Math.max(0, 1 - (this.time - this.lastHurt) * 2);
     (this.grade.uniforms.uDamage as THREE.IUniform).value = damage;
     (this.grade.uniforms.uLowHealth as THREE.IUniform).value = this.dead ? 1 : THREE.MathUtils.clamp((40 - this.health) / 40, 0, 1);
@@ -628,7 +692,7 @@ export class KaminoGame {
     });
     this.reflections.render(this.renderer, this.scene, this.camera, hidden);
     this.updateVolumeLights();
-    this.compositePass.ads = this.ads;
+    this.compositePass.ads = this.ads * (1 - this.scope);
     (this.grade.uniforms.uRain as THREE.IUniform).value = this.started ? .55 + Math.max(0, this.camera.rotation.x) * .6 : .35;
     this.composer.render(this.renderDelta);
     this.camera.quaternion.copy(saved);
@@ -691,6 +755,9 @@ export class KaminoGame {
     const wantCrouch = this.keys.has("KeyC");
     this.crouch = THREE.MathUtils.lerp(this.crouch, wantCrouch ? 1 : 0, Math.min(1, delta * 10));
     this.ads = THREE.MathUtils.lerp(this.ads, this.aiming && !this.isSprinting() ? 1 : 0, Math.min(1, delta * 12));
+    const scoping = this.aiming && this.ads > .85 && this.reloadStart < 0 && this.time - this.throwStart > .55;
+    this.scope = THREE.MathUtils.lerp(this.scope, scoping ? 1 : 0, Math.min(1, delta * 16));
+    if (this.scope < .005) this.scope = 0;
     const sprint = this.isSprinting();
     const speed = sprint ? 7.2 : this.crouch > .5 ? 2.4 : this.ads > .5 ? 2.9 : 4.6;
 
@@ -737,12 +804,13 @@ export class KaminoGame {
     const bobY = this.grounded ? Math.abs(Math.sin(this.bob)) * .045 * Math.min(1, horizontal / 4.6) * (1 - this.ads * .7) : 0;
     this.camera.position.set(this.feet.x, this.feet.y + eye - bobY, this.feet.z);
 
-    const targetFov = (sprint ? 80 : 74) * (1 - this.ads * .32);
+    const targetFov = THREE.MathUtils.lerp((sprint ? 80 : 74) * (1 - this.ads * .32), SCOPE_FOV, this.scope);
     if (Math.abs(this.camera.fov - targetFov) > .01) {
-      this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1, delta * 10));
+      this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1, delta * (this.scope > 0 ? 22 : 10)));
       this.camera.updateProjectionMatrix();
     }
-    this.controls.pointerSpeed = Number(this.$<HTMLInputElement>("#sensitivity").value) * (1 - this.ads * .45);
+    // Slower look through the scope so the reticle moves about as far per inch of mouse as at the hip.
+    this.controls.pointerSpeed = Number(this.$<HTMLInputElement>("#sensitivity").value) * (1 - this.ads * .45) * THREE.MathUtils.lerp(1, SCOPE_FOV / 50, this.scope);
 
     // Recoil recovery.
     const recover = this.recoilPitch * Math.min(1, delta * 7);
@@ -802,8 +870,28 @@ export class KaminoGame {
     this.raycaster.firstHitOnly = true;
     const hits = this.raycaster.intersectObjects([...this.battle.targetMeshes, ...this.world.shootables], false);
     const hit = hits[0];
+    const air = this.air.rayHit(this.camera.position, direction, hit ? hit.distance : 400);
+    if (air) {
+      // Shot an aircraft out of the sky.
+      const point = this.camera.position.clone().addScaledVector(direction, air.distance);
+      const muzzle = this.scope > .5
+        ? this.camera.position.clone().addScaledVector(direction, 1.4).addScaledVector(up, -.06)
+        : this.viewmodel.muzzle.getWorldPosition(new THREE.Vector3());
+      this.battle.tracer(muzzle, point, "republic");
+      this.effects.flash(muzzle, 0x6fd2ff, 6, .06, 8);
+      if (air.craft.team === "separatist") {
+        this.shotsHit++;
+        this.effects.sparksAt(point, direction.clone().negate(), BOLT_COLORS.blue, 10, 6);
+        if (!this.air.damage(air.craft, 34, true)) this.hitMarker("hit");
+      }
+      this.recoil();
+      return;
+    }
     const end = hit ? hit.point.clone() : this.camera.position.clone().addScaledVector(direction, 300);
-    const muzzle = this.viewmodel.muzzle.getWorldPosition(new THREE.Vector3());
+    // Through the scope the rifle is out of view, so the bolt leaves from just under the eye line.
+    const muzzle = this.scope > .5
+      ? this.camera.position.clone().addScaledVector(direction, 1.4).addScaledVector(up, -.06)
+      : this.viewmodel.muzzle.getWorldPosition(new THREE.Vector3());
     this.battle.tracer(muzzle, end, "republic");
     this.effects.flash(muzzle, 0x6fd2ff, 6, .06, 8);
 
@@ -824,12 +912,28 @@ export class KaminoGame {
       }
     }
 
+    this.recoil();
+  }
+
+  private recoil(): void {
     const kick = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(.75, .4, this.ads) * (this.crouch > .5 ? .7 : 1));
     this.camera.rotation.x = Math.min(Math.PI / 2 - .01, this.camera.rotation.x + kick);
     this.camera.rotation.y += (Math.random() - .5) * kick * .5;
     this.recoilPitch += kick;
     this.updateHud();
     if (this.ammo === 0) this.reload();
+  }
+
+  private onCraftDown(craft: Craft, byPlayer: boolean): void {
+    if (!this.started || this.ended) return;
+    const name = craft.name;
+    if (byPlayer) {
+      this.hitMarker("kill");
+      this.audio.ui("kill");
+      this.killfeed(`${name} shot down <em>· by you</em>`, "head");
+    } else if (craft.group.position.distanceTo(this.feet) < 160) {
+      this.killfeed(`${name} shot down`, craft.team === "republic" ? "ally" : "");
+    }
   }
 
   private reload(): void {
@@ -915,6 +1019,10 @@ export class KaminoGame {
     this.player.alive = false;
     this.deathTime = 0;
     this.firing = false;
+    this.aiming = false;
+    this.ads = this.scope = 0;
+    this.camera.fov = 74;
+    this.camera.updateProjectionMatrix();
     this.banner("Clone down", "Mission failed", true);
     this.schedule(2.6, () => this.finish(false));
   }
@@ -1024,7 +1132,7 @@ export class KaminoGame {
   private updateAmbientBattle(delta: number): void {
     if (this.ended) return;
     // Vulture droids: whoosh as they pass close, strafe the decks below.
-    for (const vulture of this.world.vultures) {
+    for (const vulture of this.air.droidFighters) {
       const position = vulture.group.position;
       const distance = position.distanceTo(this.camera.position);
       const cooldown = (vulture.group.userData.flybyAt as number | undefined) ?? -10;
@@ -1266,7 +1374,7 @@ export class KaminoGame {
     marker.classList.toggle("enemy", p.state === "fight");
     const distance = Math.hypot(this.feet.x - target.x, this.feet.z - target.z);
     this.$("#marker-dist").textContent = `${Math.round(distance)} m`;
-    marker.style.opacity = this.ads > .5 || (p.state === "capture" && distance < 4.4) ? ".25" : "1";
+    marker.style.opacity = this.scope > .5 ? "0" : this.ads > .5 || (p.state === "capture" && distance < 4.4) ? ".25" : "1";
 
     // Reticle spread and enemy highlight.
     const reticle = this.$("#reticle");
@@ -1277,7 +1385,7 @@ export class KaminoGame {
     lines[1].style.transform = `translateX(${gap}px)`;
     lines[2].style.transform = `translateY(${-gap - 9}px)`;
     lines[3].style.transform = `translateY(${gap}px)`;
-    reticle.style.opacity = this.isSprinting() || this.reloadStart >= 0 ? ".2" : "1";
+    reticle.style.opacity = this.scope > .3 ? "0" : this.isSprinting() || this.reloadStart >= 0 ? ".2" : "1";
     this.raycaster.setFromCamera(new THREE.Vector2(), this.camera);
     this.raycaster.far = 120;
     this.raycaster.firstHitOnly = true;

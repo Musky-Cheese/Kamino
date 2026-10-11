@@ -14,6 +14,9 @@ const MODEL_FILES = {
   clone: "clone.glb",
   b1: "b1.glb",
   b2: "b2.glb",
+  arc170: "arc170.glb",
+  v19: "v19.glb",
+  trifighter: "trifighter.glb",
   /** Quaternius Universal Animation Library clips (skeleton only), retargeted onto the clone and B1. */
   anims: "anims.glb",
 } as const;

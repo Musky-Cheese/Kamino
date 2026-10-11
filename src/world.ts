@@ -5,9 +5,8 @@ import { BRIDGES, DAIS, LANDER, OCEAN_LEVEL, ZONES, type Bridge, type Zone } fro
 import type { Materials } from "./materials";
 import { Navigation } from "./navigation";
 import { rng, smokeTexture } from "./textures";
-import { buildGunship, buildLander, buildVulture, taperedBox } from "./vehicles";
+import { buildGunship, buildLander, taperedBox } from "./vehicles";
 
-type Vulture = { group: THREE.Group; guns: THREE.Object3D[]; offset: number; roll: number; lastTangent: THREE.Vector3 };
 
 export type CoverPoint = { position: THREE.Vector2; zone: number; taken: boolean };
 
@@ -67,12 +66,6 @@ export class World {
   readonly ambientPoints: THREE.Vector3[] = [];
   private readonly blinkers: THREE.Mesh[] = [];
   private readonly flyers: Flyer[] = [];
-  readonly vultures: Vulture[] = [];
-  private readonly vulturePath = new THREE.CatmullRomCurve3([
-    [-140, 40, 60], [-60, 22, 70], [10, 16, 40], [40, 20, -10], [20, 18, -60], [-30, 24, -100],
-    [-90, 34, -60], [-60, 26, 0], [0, 20, 20], [70, 28, 30], [150, 45, -20], [60, 55, -150], [-120, 50, -120],
-  ].map(([x, y, z]) => new THREE.Vector3(x, y, z)), true, "centripetal");
-  private readonly vulturePathLength = this.vulturePath.getLength();
   private readonly smoke: Array<{ sprite: THREE.Sprite; age: number; life: number; velocity: THREE.Vector3; start: THREE.Vector3 }> = [];
   private readonly random = rng(2026);
   private readonly railMaterial: THREE.MeshStandardMaterial;
@@ -114,7 +107,6 @@ export class World {
     this.distantCity();
     this.batcher.build(this.scene);
     this.spawnFlyers();
-    this.spawnVultures();
   }
 
   get shootables(): THREE.Mesh[] { return this.batcher.shootables; }
@@ -633,30 +625,6 @@ export class World {
     }
   }
 
-  private spawnVultures(): void {
-    for (let i = 0; i < 3; i++) {
-      const { group, guns } = buildVulture(this.m);
-      this.scene.add(group);
-      this.vultures.push({ group, guns, offset: i * .31 + (i === 2 ? .04 : 0), roll: 0, lastTangent: new THREE.Vector3(0, 0, -1) });
-    }
-  }
-
-  private updateVultures(delta: number, time: number): void {
-    const speed = 42;
-    for (const v of this.vultures) {
-      const u = ((time * speed / this.vulturePathLength) + v.offset) % 1;
-      const position = this.vulturePath.getPointAt(u);
-      const tangent = this.vulturePath.getTangentAt(u);
-      v.group.position.copy(position);
-      v.group.lookAt(position.clone().sub(tangent));
-      // Bank into turns: roll follows the horizontal change of heading.
-      const turn = new THREE.Vector3().crossVectors(v.lastTangent, tangent).y / Math.max(delta, 1e-3);
-      v.roll = THREE.MathUtils.lerp(v.roll, THREE.MathUtils.clamp(turn * 1.6, -1.2, 1.2), Math.min(1, delta * 3));
-      v.group.rotateZ(v.roll);
-      v.lastTangent.copy(tangent);
-    }
-  }
-
   /** Muzzle positions of the circling gunships' chin guns. */
   gunshipGuns(): THREE.Vector3[] {
     return this.flyers.map((flyer) => flyer.gun.getWorldPosition(new THREE.Vector3()));
@@ -664,7 +632,6 @@ export class World {
 
   update(delta: number, time: number): void {
     this.m.update(time);
-    this.updateVultures(delta, time);
     for (const flyer of this.flyers) {
       const a = flyer.phase + time * flyer.speed;
       const x = flyer.center.x + Math.cos(a) * flyer.radius;
