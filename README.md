@@ -69,15 +69,27 @@ Build the production version with `pnpm build`. Add `?test` to the URL to skip t
 | `src/postfx.ts` | Depth-aware post: volumetric light, ambient occlusion, composite + ADS blur |
 | `src/envprobe.ts` | Dynamic environment reflections captured around the player |
 | `src/actors.ts` | Droid and clone models and procedural animation |
-| `src/vehicles.ts` | Gunship and Separatist lander models |
+| `src/vehicles.ts` | Gunship, vulture and lander: loaded models placed with lights and gun anchors, procedural fallbacks |
+| `src/models.ts` | glTF loading (meshopt, WebP) behind the loading screen; fitting models to the game's scale |
 | `src/weapon.ts` | First-person DC-15A |
 | `src/effects.ts` | Sparks, scorch marks, explosions, debris, light pool |
 | `src/audio.ts` | Procedural sound |
 | `src/textures.ts` / `src/materials.ts` | Procedural PBR textures and shared materials |
 | `src/batcher.ts` | Static geometry merging + BVH raycasting |
+| `scripts/optimize-models.mjs` | Rebuilds `public/models/` from the raw downloads (gltf-transform: meshopt, WebP, 2K max) |
+
+## Credits
+
+Third-party models, all used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). They were compressed, rescaled and in some cases re-textured for the game.
+
+| Asset | Author | Source |
+| --- | --- | --- |
+| LAAT/i Gunship | A308 Digital | [Sketchfab](https://sketchfab.com/3d-models/laati-gunship-74dcce4616614706a5a14cc18f9e051f) |
+| Vulture Droid | DrEgguin | [Sketchfab](https://sketchfab.com/3d-models/vulture-droid-5542f951834e4032b229ebdee12d3310) |
+| C-9979 landing craft (re-textured) | bruhepic925 | [Sketchfab](https://sketchfab.com/3d-models/c-9979-landing-craft-65850006f9d14e36b2a416c026c3b74b) |
 
 ## Project status
 
 Built with TypeScript, Three.js and Vite. The earlier top-down multiplayer experiment is preserved at Git tag `prototype-top-down-v0.1`.
 
-This project is unofficial and is not affiliated with or endorsed by Lucasfilm, Disney, or Electronic Arts. It uses original procedural geometry, textures and sound, and no official game assets.
+This project is unofficial and is not affiliated with or endorsed by Lucasfilm, Disney, or Electronic Arts. It uses the fan-made models credited above plus original procedural geometry, textures and sound, and no official game assets.

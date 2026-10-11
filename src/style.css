@@ -47,6 +47,11 @@ input[type="range"] { accent-color: var(--cyan); }
 .controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 12px; margin-top: 28px; color: #8da3b0; font: 600 .68rem/1.5 Inter, sans-serif; text-transform: uppercase; }
 kbd { display: block; margin-bottom: 3px; color: #effaff; font: 700 .74rem/1.2 Inter, sans-serif; }
 .disclaimer { margin: 24px 0 -10px; color: #526773; font-size: .62rem; line-height: 1.5; }
+.credits { margin-top: 18px; color: #6f8794; font: .66rem/1.6 Inter, sans-serif; text-align: left; }
+.credits summary { cursor: pointer; color: var(--cyan); font-weight: 700; letter-spacing: .2em; text-transform: uppercase; text-align: center; }
+.credits ul { margin: 10px 0 6px; padding-left: 18px; }
+.credits p { margin: 0; }
+.credits a { color: #9fdcf3; }
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 0 0 26px; }
 .stats div { padding: 12px 6px; border: 1px solid rgba(111, 216, 255, .18); background: rgba(111, 216, 255, .04); }
 .stats strong { display: block; font: 700 1.9rem/1 "Barlow Condensed", sans-serif; }
