@@ -7,5 +7,7 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    // Three.js alone is ~600 kB; one bundle is fine for a single-page game.
+    chunkSizeWarningLimit: 1200,
   },
 });

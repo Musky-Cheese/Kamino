@@ -5,4 +5,4 @@ const root = document.querySelector<HTMLElement>("#game");
 
 if (!root) throw new Error("Game root not found");
 
-new KaminoGame(root).initialize();
+void new KaminoGame(root).initialize();

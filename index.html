@@ -4,38 +4,104 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#07131c" />
-    <title>Kamino — Phase One</title>
+    <title>Kamino — Battle for Tipoca City</title>
   </head>
   <body>
     <main id="game" aria-label="Kamino first-person game">
-      <section id="menu" class="panel">
-        <p class="eyebrow">Phase two · unofficial fan-made prototype</p>
-        <h1>KAMINO</h1>
-        <p class="mission-copy">Tipoca City is under attack. Join two clone troopers in the rain courtyard and repel three waves of battle droids.</p>
-        <button id="start" type="button">Begin mission</button>
-        <div class="controls" aria-label="Controls">
-          <span><kbd>WASD</kbd> Move</span><span><kbd>Mouse</kbd> Look</span>
-          <span><kbd>Click</kbd> Fire</span><span><kbd>R</kbd> Reload</span>
-          <span><kbd>Shift</kbd> Sprint</span><span><kbd>Esc</kbd> Pause</span>
+      <section id="loading" aria-live="polite">
+        <div class="loading-inner">
+          <p class="eyebrow">Tipoca City · Kamino</p>
+          <h1>KAMINO</h1>
+          <div class="load-bar"><i id="load-bar"></i></div>
+          <p id="load-text">Preparing the storm…</p>
         </div>
-        <p class="disclaimer">A non-commercial fan project. No official Star Wars assets are used.</p>
       </section>
 
-      <section id="hud" class="hidden" aria-live="polite">
-        <div class="objective"><small id="wave">WAVE 1 / 3</small><strong>Secure the rain courtyard</strong></div>
-        <div class="enemy-count"><small>DROIDS</small><strong id="enemies">5</strong></div>
+      <section id="menu" class="panel hidden">
+        <p class="eyebrow">The battle for Tipoca City · unofficial fan project</p>
+        <h1>KAMINO</h1>
+        <p class="mission-copy">The Separatists have landed on Tipoca City. Droids hold every platform between your landing pad and their landing craft. Fight across the bridges, take each sector, and push the droid army back into the sea.</p>
+        <div class="options">
+          <label>Difficulty
+            <select id="difficulty">
+              <option value="0.7">Recruit</option>
+              <option value="1" selected>Trooper</option>
+              <option value="1.35">ARC Trooper</option>
+            </select>
+          </label>
+          <label>Graphics
+            <select class="quality-select">
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+        </div>
+        <button id="start" type="button">Deploy</button>
+        <div class="controls" aria-label="Controls">
+          <span><kbd>WASD</kbd> Move</span><span><kbd>Mouse</kbd> Look</span><span><kbd>Left click</kbd> Fire</span>
+          <span><kbd>Right click</kbd> Aim</span><span><kbd>R</kbd> Reload</span><span><kbd>G</kbd> Thermal detonator</span>
+          <span><kbd>Shift</kbd> Sprint</span><span><kbd>Space</kbd> Jump</span><span><kbd>C / Ctrl</kbd> Crouch</span>
+        </div>
+        <p class="disclaimer">A non-commercial fan project. Not affiliated with Lucasfilm, Disney or Electronic Arts. All geometry, textures and sound are generated in code.</p>
+      </section>
+
+      <section id="pause" class="panel hidden">
+        <p class="eyebrow">Mission paused</p>
+        <h2>PAUSED</h2>
+        <div class="settings">
+          <label>Mouse sensitivity <input id="sensitivity" type="range" min="0.2" max="2.5" step="0.05" value="1" /></label>
+          <label>Volume <input id="volume" type="range" min="0" max="1" step="0.05" value="0.8" /></label>
+          <label>Graphics
+            <select class="quality-select">
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+        </div>
+        <div class="buttons">
+          <button id="resume" type="button">Resume</button>
+          <button id="restart-pause" class="secondary" type="button">Restart mission</button>
+        </div>
+      </section>
+
+      <section id="hud" class="hidden">
+        <div id="visor" aria-hidden="true"></div>
+        <div id="front" aria-label="Front line"></div>
+        <div class="objective">
+          <small id="obj-kicker">Objective</small>
+          <strong id="obj-title">Push to Besh Junction</strong>
+          <span id="obj-detail"></span>
+          <div id="capture-meter" class="hidden"><i id="capture-fill"></i></div>
+        </div>
+        <div id="marker" aria-hidden="true"><b></b><span id="marker-dist"></span></div>
+        <div id="killfeed" aria-live="polite"></div>
         <div id="reticle" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b></div>
-        <div id="hit-marker" aria-hidden="true">×</div>
-        <p id="mission-message"></p>
-        <div class="health"><small>ARMOR INTEGRITY</small><div class="meter"><i id="health-bar"></i></div><strong id="health">100</strong></div>
-        <div class="ammo"><small>DC-15S</small><strong id="ammo">20</strong><span>/ 20</span></div>
+        <div id="hit-marker" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+        <div id="damage-arcs" aria-hidden="true"></div>
+        <div id="banner"><small></small><strong></strong></div>
+        <div id="radio"><span class="radio-from"></span><p></p></div>
+        <div class="vitals">
+          <small>Armor integrity</small>
+          <div class="meter"><i id="health-bar"></i></div>
+          <strong id="health">100</strong>
+          <div id="grenades" aria-label="Thermal detonators"></div>
+        </div>
+        <div id="squad" aria-label="Squad"></div>
+        <div class="ammo">
+          <small>DC-15A blaster rifle</small>
+          <strong id="ammo">50</strong><span>/ 50</span>
+          <div id="reload-bar"><i></i></div>
+        </div>
       </section>
 
       <section id="result" class="panel hidden">
         <p class="eyebrow" id="result-kicker">Mission complete</p>
-        <h2 id="result-title">COURTYARD SECURED</h2>
-        <p id="result-copy">The droid strike team has been neutralized.</p>
-        <button id="restart" type="button">Run mission again</button>
+        <h2 id="result-title">TIPOCA CITY HOLDS</h2>
+        <p id="result-copy"></p>
+        <div class="stats" id="result-stats"></div>
+        <button id="restart" type="button">Fight again</button>
       </section>
       <div id="damage-flash" aria-hidden="true"></div>
     </main>
