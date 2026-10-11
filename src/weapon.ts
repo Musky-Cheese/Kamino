@@ -25,6 +25,8 @@ export class Viewmodel {
   private readonly cell: THREE.Group;
   private readonly flash: THREE.Sprite;
   private readonly flashCross: THREE.Mesh;
+  /** Soft camera-side light so the first-person rifle keeps its shape in the storm. */
+  private readonly fill = new THREE.PointLight(0x9ed8ff, 7, 1.35, 2);
   private readonly light = new THREE.PointLight(0x6fd2ff, 0, 7, 2);
   private readonly display: CanvasRenderingContext2D;
   private readonly displayTexture: THREE.CanvasTexture;
@@ -40,13 +42,14 @@ export class Viewmodel {
 
   constructor() {
     const white = grimeTextures(911, [222, 226, 224], .8);
-    const gunmetal = new THREE.MeshStandardMaterial({ color: 0x23282c, metalness: .85, roughness: .34 });
-    const grey = new THREE.MeshStandardMaterial({ color: 0x5c656c, metalness: .8, roughness: .3 });
-    const black = new THREE.MeshStandardMaterial({ color: 0x0c0e10, metalness: .3, roughness: .7 });
+    const gunmetal = new THREE.MeshStandardMaterial({ color: 0x627c8d, metalness: .62, roughness: .36 });
+    const grey = new THREE.MeshStandardMaterial({ color: 0x91a4ae, metalness: .58, roughness: .34 });
+    const black = new THREE.MeshStandardMaterial({ color: 0x314852, metalness: .3, roughness: .58 });
     const armor = new THREE.MeshStandardMaterial({ ...white, color: 0xc4c8c6, metalness: .12, roughness: 1 });
-    const glove = new THREE.MeshStandardMaterial({ color: 0x121417, metalness: .05, roughness: .85 });
+    const glove = new THREE.MeshStandardMaterial({ color: 0x252d32, metalness: .08, roughness: .76 });
     const blue = new THREE.MeshStandardMaterial({ color: 0x0b1a22, emissive: 0x52c8ff, emissiveIntensity: 1.1 });
-    const lens = new THREE.MeshStandardMaterial({ color: 0x061018, metalness: 1, roughness: .02, emissive: 0x0d3446, emissiveIntensity: 1 });
+    const lens = new THREE.MeshStandardMaterial({ color: 0x244f66, metalness: .7, roughness: .14, emissive: 0x0a2738, emissiveIntensity: .45 });
+    const lensSheen = new THREE.MeshBasicMaterial({ color: 0x8cdcff, transparent: true, opacity: .22, depthWrite: false, toneMapped: false });
 
     const g = this.gun;
     const add = (geometry: THREE.BufferGeometry, material: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, parent: THREE.Object3D = g) => {
@@ -70,6 +73,8 @@ export class Viewmodel {
     add(cyl(.024, .021, .03), black, 0, .108, .1);
     add(new THREE.CircleGeometry(.019, 18), lens, 0, .108, -.151, 0, Math.PI);
     add(new THREE.CircleGeometry(.017, 18), lens, 0, .108, .116);
+    // A faint coated-glass reflection keeps the optic from reading as a flat blue disk.
+    add(new THREE.CircleGeometry(.009, 16), lensSheen, -.004, .112, -.152, 0, Math.PI);
     // Barrel shroud with cooling rings.
     add(cyl(.029, .03, .52), grey, 0, .012, -.47);
     for (let z = -.27; z >= -.7; z -= .045) add(new THREE.TorusGeometry(.031, .006, 6, 18), gunmetal, 0, .012, z);
@@ -134,6 +139,8 @@ export class Viewmodel {
     this.muzzle.add(this.flashCross);
     this.light.position.set(0, .05, -.85);
     g.add(this.light);
+    this.fill.position.set(.18, .12, .08);
+    g.add(this.fill);
 
     g.traverse((object) => {
       if (object instanceof THREE.Mesh) { object.castShadow = false; object.receiveShadow = false; object.frustumCulled = false; }
