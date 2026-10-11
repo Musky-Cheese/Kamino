@@ -270,12 +270,11 @@ export class KaminoGame {
     document.querySelectorAll<HTMLSelectElement>(".quality-select").forEach((select) => select.value = quality);
     const ratio = quality === "high" ? Math.min(devicePixelRatio * 1.25, 2) : quality === "medium" ? Math.min(devicePixelRatio, 1.25) : Math.min(devicePixelRatio, 1) * .8;
     this.renderer.setPixelRatio(ratio);
-    this.renderer.setSize(innerWidth, innerHeight);
     this.composer.setPixelRatio(ratio);
-    this.composer.setSize(innerWidth, innerHeight);
     this.reflections.enabled = quality !== "low";
     this.reflections.scale = quality === "high" ? .5 : .33;
-    this.reflections.setSize(innerWidth * ratio, innerHeight * ratio);
+    this.viewSize = { width: -1, height: -1 };
+    this.syncSize();
     const shadow = quality === "high" ? 4096 : quality === "medium" ? 2048 : 1024;
     if (this.moon.shadow.mapSize.x !== shadow) {
       this.moon.shadow.mapSize.set(shadow, shadow);
@@ -413,13 +412,24 @@ export class KaminoGame {
       this.lookX += event.movementX;
       this.lookY += event.movementY;
     });
-    addEventListener("resize", () => {
-      this.camera.aspect = innerWidth / innerHeight;
-      this.camera.updateProjectionMatrix();
-      this.renderer.setSize(innerWidth, innerHeight);
-      this.composer.setSize(innerWidth, innerHeight);
-      this.reflections.setSize(innerWidth * this.renderer.getPixelRatio(), innerHeight * this.renderer.getPixelRatio());
-    });
+    addEventListener("resize", () => this.syncSize());
+  }
+
+  private viewSize = { width: -1, height: -1 };
+
+  /**
+   * Match the canvas to the window. Also polled every frame: a page opened in a background tab can
+   * start at 0×0 (NaN aspect, black screen) without ever receiving a resize event.
+   */
+  private syncSize(): void {
+    const width = Math.max(1, innerWidth), height = Math.max(1, innerHeight);
+    if (width === this.viewSize.width && height === this.viewSize.height) return;
+    this.viewSize = { width, height };
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(width, height);
+    this.composer.setSize(width, height);
+    this.reflections.setSize(width * this.renderer.getPixelRatio(), height * this.renderer.getPixelRatio());
   }
 
   private get running(): boolean {
@@ -470,6 +480,7 @@ export class KaminoGame {
   // ------------------------------------------------------------------ main loop
 
   private frame(): void {
+    this.syncSize();
     this.timer.update();
     const delta = Math.min(this.timer.getDelta(), .05);
     const simulating = this.started && !this.ended && !this.paused;
