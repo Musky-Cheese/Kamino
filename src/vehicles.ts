@@ -116,10 +116,83 @@ function buildProceduralVulture(m: Materials): { group: THREE.Group; guns: THREE
   return { group: g, guns };
 }
 
-export type Lander = { group: THREE.Group; lights: THREE.Mesh[] };
+export type Lander = {
+  group: THREE.Group;
+  lights: THREE.Mesh[];
+  /** Local-space collision footprint: the hull, then whatever stands on the deck (feet, struts). */
+  solids: THREE.Box3[];
+  /** Local z where the boarding ramp meets the deck. */
+  rampEnd: number;
+};
 
-/** Separatist landing craft. Nose and boarding ramp face +Z. `crashed` adds sprawling spider legs instead of landing struts. */
+const luminance = (c: THREE.Color) => c.r * .3 + c.g * .59 + c.b * .11;
+
+/**
+ * The C-9979 export is flat colours (wings) plus low-res textures (fuselage). Re-skin it with the
+ * game's weathered Separatist materials: greys and textured parts become hull plating, dark parts
+ * dark metal, saturated accents keep their colour. Returns the fuselage bounds in `root` space.
+ */
+function reskinLander(m: Materials, root: THREE.Object3D): THREE.Box3 {
+  root.updateMatrixWorld(true);
+  const fuselage = new THREE.Box3();
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    const source = object.material as THREE.MeshStandardMaterial;
+    const wing = source.name.startsWith("Color_");
+    if (!wing) fuselage.expandByObject(object, true);
+    const c = source.color;
+    const saturated = Math.max(c.r, c.g, c.b) - Math.min(c.r, c.g, c.b) > .15;
+    if (source.map) object.material = m.sepHull;
+    else if (saturated) return;
+    else object.material = luminance(c) >= .08 && source.name !== "Color_I20" ? m.sepHull : m.sepDark;
+  });
+  return fuselage;
+}
+
+/** Bounds of the vertices within `height` of the ground, split into left and right clusters. */
+function groundContacts(root: THREE.Object3D, height: number): THREE.Box3[] {
+  const sides = [new THREE.Box3(), new THREE.Box3()];
+  const v = new THREE.Vector3();
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    const position = object.geometry.attributes.position;
+    for (let i = 0; i < position.count; i++) {
+      v.fromBufferAttribute(position, i).applyMatrix4(object.matrixWorld);
+      if (v.y < height) sides[v.x < 0 ? 0 : 1].expandByPoint(v);
+    }
+  });
+  return sides.filter((box) => !box.isEmpty());
+}
+
+/** Separatist C-9979 landing craft. Nose and boarding ramp face +Z. `crashed` sets it burning instead of landed. */
 export function buildLander(m: Materials, crashed = false): Lander {
+  if (!hasModel("lander")) return buildProceduralLander(m, crashed);
+  // The export's fuselage runs along X with the nose at +X.
+  const g = instantiate("lander", { rotation: [0, -Math.PI / 2, 0], length: 14 });
+  const fuselage = reskinLander(m, g);
+  const all = new THREE.Box3().setFromObject(g, true);
+  const lights: THREE.Mesh[] = [];
+  for (const s of [-1, 1]) lights.push(mesh(g, new THREE.SphereGeometry(.16, 8, 6), m.redLight, s * (all.max.x - .4), all.max.y * .55, all.getCenter(new THREE.Vector3()).z));
+  lights.push(mesh(g, new THREE.SphereGeometry(.18, 8, 6), m.redLight, 0, all.max.y + .1, fuselage.getCenter(new THREE.Vector3()).z));
+  const front = fuselage.max.z, sill = Math.max(fuselage.min.y, .3);
+  if (crashed) {
+    const c = fuselage.getCenter(new THREE.Vector3());
+    for (const [x, y, z, s] of [[.4, .5, .2, 1.4], [-.6, .3, -.3, 1], [.1, .7, .6, .8]] as const) {
+      const fire = mesh(g, new THREE.SphereGeometry(s, 10, 8), m.fireGlow, c.x + x * fuselage.max.x, c.y + y, c.z + z * (front - c.z));
+      fire.scale.y = .4;
+    }
+    return { group: g, lights, solids: [fuselage], rampEnd: front };
+  }
+  // Boarding ramp from the nose down to the deck, and a lit hold behind it.
+  const run = Math.max(2.5, sill * 2.6);
+  const ramp = mesh(g, new THREE.BoxGeometry(2.6, .2, Math.hypot(run, sill)), m.sepDark, 0, sill / 2, front + run / 2, Math.atan2(sill, run));
+  ramp.castShadow = true;
+  const width = fuselage.max.x - fuselage.min.x;
+  mesh(g, new THREE.BoxGeometry(Math.min(2.4, width * .8), .08, .08), m.amberLight, 0, sill + 1.9, front - .05);
+  return { group: g, lights, solids: [fuselage, ...groundContacts(g, .5)], rampEnd: front + run };
+}
+
+function buildProceduralLander(m: Materials, crashed: boolean): Lander {
   const g = new THREE.Group();
   const profile = [
     [0, -10], [1.5, -9.4], [2.7, -7.8], [3.35, -4.5], [3.55, 0], [3.35, 4], [2.7, 7], [1.7, 9], [.4, 10], [0, 10.05],
@@ -176,5 +249,7 @@ export function buildLander(m: Materials, crashed = false): Lander {
     mesh(g, new THREE.BoxGeometry(2.4, .08, .08), m.amberLight, 0, 3.45, 9.25);
     for (const s of [-1, 1]) mesh(g, new THREE.BoxGeometry(.08, 1.6, .08), m.amberLight, s * 1.25, 2.5, 9.25);
   }
-  return { group: g, lights };
+  const box = (x: number, z: number, w: number, l: number, h: number) => new THREE.Box3(new THREE.Vector3(x - w / 2, 0, z - l / 2), new THREE.Vector3(x + w / 2, h, z + l / 2));
+  const solids = [box(0, -.5, 7.4, 20, 7), box(-10.8, -2.4, 2, 2, 5), box(10.8, -2.4, 2, 2, 5)];
+  return { group: g, lights, solids, rampEnd: 15 };
 }

@@ -416,18 +416,18 @@ export class World {
   }
 
   private parkedLander(): void {
-    const { group, lights } = buildLander(this.m);
+    const { group, lights, solids, rampEnd } = buildLander(this.m);
     group.position.set(LANDER.x, 0, LANDER.z);
     this.batcher.addObject(group, { cast: true, uvScale: 1 / 5 });
     void lights;
-    this.nav.addBox(LANDER.x, LANDER.z - .5, 7.4, 20, 0, 7);
-    this.nav.addCircle(LANDER.x - 10.8, LANDER.z - 2.4, 1, 5);
-    this.nav.addCircle(LANDER.x + 10.8, LANDER.z - 2.4, 1, 5);
+    for (const solid of solids) {
+      const center = solid.getCenter(new THREE.Vector3()), size = solid.getSize(new THREE.Vector3());
+      this.nav.addBox(LANDER.x + center.x, LANDER.z + center.z, size.x, size.z, 0, solid.max.y);
+    }
     // Ramp side rails keep droids flowing out of the front.
-    this.nav.addBox(LANDER.x - 1.9, LANDER.z + 11.5, .4, 7, 0, 2);
-    this.nav.addBox(LANDER.x + 1.9, LANDER.z + 11.5, .4, 7, 0, 2);
+    for (const s of [-1, 1]) this.nav.addBox(LANDER.x + s * 1.9, LANDER.z + rampEnd - 3.5, .4, 7, 0, 2);
     const interior = new THREE.PointLight(0xff9a50, 30, 14, 2);
-    interior.position.set(LANDER.x, 2.6, LANDER.z + 9.5);
+    interior.position.set(LANDER.x, 2.6, LANDER.z + rampEnd - 5.5);
     this.scene.add(interior);
   }
 

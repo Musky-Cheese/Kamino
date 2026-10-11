@@ -9,6 +9,7 @@ import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.j
 const MODEL_FILES = {
   gunship: "gunship.glb",
   vulture: "vulture.glb",
+  lander: "lander.glb",
 } as const;
 
 export type ModelName = keyof typeof MODEL_FILES;

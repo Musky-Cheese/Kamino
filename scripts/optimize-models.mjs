@@ -11,8 +11,9 @@ import sharp from "sharp";
 const SOURCES = {
   gunship: { dir: "laati_gunship", textureSize: 2048 },
   vulture: { dir: "vulture_droid", textureSize: 1024 },
-  // The export also contains unrelated scenery ~650 m away; keep only the craft itself.
-  lander: { dir: "c-9979_landing_craft", textureSize: 1024, keep: (b) => b.min[0] < -300 },
+  // The export also holds an MTT near the origin; keep only the C-9979 ~650 m away. Its flat
+  // colours are swapped for the game's Separatist hull materials at load, so skip the palette pass.
+  lander: { dir: "c-9979_landing_craft", textureSize: 1024, keep: (b) => b.min[0] < -300, palette: false },
 };
 
 await Promise.all([MeshoptDecoder.ready, MeshoptEncoder.ready, MeshoptSimplifier.ready]);
@@ -32,7 +33,8 @@ for (const [name, source] of Object.entries(SOURCES)) {
       if (node.getMesh() && !source.keep(getBounds(node))) node.dispose();
     }
   }
-  const steps = [dedup(), flatten(), join(), weld(), resample(), palette({ min: 5 })];
+  const steps = [dedup(), flatten(), join(), weld(), resample()];
+  if (source.palette !== false) steps.push(palette({ min: 5 }));
   if (source.simplifyRatio) steps.push(simplify({ simplifier: MeshoptSimplifier, ratio: source.simplifyRatio, error: .001 }));
   steps.push(
     prune(),
