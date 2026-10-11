@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import type { Materials } from "./materials";
+import { hasModel, instantiate } from "./models";
 
 /** Box whose cross-section scales linearly from the back (+z) to the front (-z). */
 export function taperedBox(w: number, h: number, l: number, frontX: number, frontY: number, backX = 1, backY = 1, segments = 3): THREE.BufferGeometry {
@@ -25,10 +26,25 @@ function mesh(group: THREE.Object3D, geometry: THREE.BufferGeometry, material: T
   return m;
 }
 
-export type Gunship = { group: THREE.Group; blinkers: THREE.Mesh[]; searchlight: THREE.Object3D };
+export type Gunship = { group: THREE.Group; blinkers: THREE.Mesh[]; searchlight: THREE.Object3D; /** Chin gun muzzle. */ gun: THREE.Object3D };
 
-/** Republic LAAT/i-style gunship, nose toward -Z, skids at y = 0. */
+function anchor(parent: THREE.Object3D, x: number, y: number, z: number): THREE.Object3D {
+  const object = new THREE.Object3D();
+  object.position.set(x, y, z);
+  parent.add(object);
+  return object;
+}
+
+/** Republic LAAT/i gunship, nose toward -Z, hull resting on y = 0. */
 export function buildGunship(m: Materials): Gunship {
+  if (!hasModel("gunship")) return buildProceduralGunship(m);
+  // The export faces +Z and is rolled 13.6° about its long axis.
+  const g = instantiate("gunship", { rotation: [0, Math.PI, THREE.MathUtils.degToRad(-13.64)], length: 17.5 });
+  const blinkers = [-1, 1].map((s) => mesh(g, new THREE.SphereGeometry(.12, 8, 6), s < 0 ? m.redLight : m.coolLight, s * 8.6, 2.15, 2.6));
+  return { group: g, blinkers, searchlight: anchor(g, 0, .6, -6.2), gun: anchor(g, 0, .95, -8.9) };
+}
+
+function buildProceduralGunship(m: Materials): Gunship {
   const g = new THREE.Group();
   const white = m.repWhite;
   mesh(g, new RoundedBoxGeometry(3.4, 3, 7.5, 2, .35), white, 0, 2.3, .6);
@@ -61,11 +77,19 @@ export function buildGunship(m: Materials): Gunship {
   const searchlight = new THREE.Object3D();
   searchlight.position.set(0, 1.2, -6.8);
   g.add(searchlight);
-  return { group: g, blinkers, searchlight };
+  return { group: g, blinkers, searchlight, gun: anchor(g, 0, 1, -7.5) };
 }
 
 /** Separatist vulture droid in flight mode: a narrow body with four blade wings in an X, red photoreceptors. Nose toward -Z. */
 export function buildVulture(m: Materials): { group: THREE.Group; guns: THREE.Object3D[] } {
+  if (!hasModel("vulture")) return buildProceduralVulture(m);
+  const g = instantiate("vulture", { length: 8, centerY: true, shadows: false });
+  // Blaster cannons at the forward tips of the four blade wings.
+  const guns = [-1, 1].flatMap((sx) => [-1, 1].map((sy) => anchor(g, sx * 1.9, sy * .7, -4)));
+  return { group: g, guns };
+}
+
+function buildProceduralVulture(m: Materials): { group: THREE.Group; guns: THREE.Object3D[] } {
   const g = new THREE.Group();
   const body = mesh(g, taperedBox(.9, .9, 4.6, .5, .55), m.sepHull, 0, 0, 0);
   body.castShadow = false;

@@ -17,6 +17,26 @@ export type BatchOptions = {
 
 type Bucket = { material: THREE.Material; geometries: THREE.BufferGeometry[]; cast: boolean; receive: boolean; shoot: boolean; chunk: string };
 
+/**
+ * Position / normal / uv as plain Float32 attributes. Loaded glTF meshes are quantized
+ * (normalized Int16 / Int8) or interleaved, which would clamp under a world transform and can't merge.
+ */
+function floatCopy(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  const copy = new THREE.BufferGeometry();
+  for (const name of ["position", "normal", "uv"]) {
+    const attribute = geometry.getAttribute(name);
+    if (!attribute) continue;
+    const { count, itemSize } = attribute;
+    const array = new Float32Array(count * itemSize);
+    for (let i = 0; i < count; i++) {
+      for (let k = 0; k < itemSize; k++) array[i * itemSize + k] = attribute.getComponent(i, k);
+    }
+    copy.setAttribute(name, new THREE.BufferAttribute(array, itemSize));
+  }
+  if (geometry.index) copy.setIndex(geometry.index.clone());
+  return copy;
+}
+
 const scratch = new THREE.Matrix4();
 const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3();
 
@@ -31,10 +51,8 @@ export class StaticBatcher {
   readonly meshes: THREE.Mesh[] = [];
 
   add(geometry: THREE.BufferGeometry, material: THREE.Material, transform?: THREE.Matrix4 | THREE.Object3D, options: BatchOptions = {}): void {
-    let geo = geometry.index ? geometry.toNonIndexed() : geometry.clone();
-    for (const name of Object.keys(geo.attributes)) {
-      if (name !== "position" && name !== "normal" && name !== "uv") geo.deleteAttribute(name);
-    }
+    let geo = floatCopy(geometry);
+    if (geo.index) geo = geo.toNonIndexed();
     if (!geo.attributes.normal) geo.computeVertexNormals();
     if (!geo.attributes.uv) geo.setAttribute("uv", new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 2), 2));
     if (transform) {

@@ -20,6 +20,7 @@ const FLOOD_HAZE = new THREE.Color(1, .86, .66).multiplyScalar(1.6);
 const SEARCH_HAZE = new THREE.Color(.8, .9, 1).multiplyScalar(5);
 const FIRE_HAZE = new THREE.Color(1, .42, .12).multiplyScalar(2.5);
 const LAMP_HAZE = new THREE.Color(1, .84, .6).multiplyScalar(.8);
+import { loadModels } from "./models";
 import { STEP_HEIGHT } from "./navigation";
 import { Viewmodel } from "./weapon";
 import { World } from "./world";
@@ -226,7 +227,9 @@ export class KaminoGame {
       this.$("#load-text").textContent = text;
       await nextFrame();
     };
-    await progress(.05, "Forging hull plating…");
+    await progress(.02, "Requisitioning gunships…");
+    await loadModels((fraction) => { this.$("#load-bar").style.width = `${(.02 + fraction * .28) * 100}%`; });
+    await progress(.3, "Forging hull plating…");
     this.scene.fog = this.fog;
     this.scene.background = new THREE.Color(0x05101a);
     this.materials = new Materials(this.renderer.capabilities.getMaxAnisotropy());

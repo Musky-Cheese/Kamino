@@ -11,7 +11,7 @@ type Vulture = { group: THREE.Group; guns: THREE.Object3D[]; offset: number; rol
 
 export type CoverPoint = { position: THREE.Vector2; zone: number; taken: boolean };
 
-type Flyer = { group: THREE.Group; blinkers: THREE.Mesh[]; radius: number; height: number; speed: number; phase: number; center: THREE.Vector2; bank: number };
+type Flyer = { group: THREE.Group; blinkers: THREE.Mesh[]; gun: THREE.Object3D; radius: number; height: number; speed: number; phase: number; center: THREE.Vector2; bank: number };
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -406,7 +406,7 @@ export class World {
     const { group, blinkers } = buildGunship(this.m);
     group.position.set(zone.center.x - 8.5, 0, zone.center.y - 1);
     group.rotation.y = .2;
-    this.batcher.addObject(group);
+    this.batcher.addObject(group, { uv: "keep" });
     // Hull only: the wings are high enough to walk under.
     this.nav.addBox(group.position.x, group.position.z + 1, 4.2, 17, group.rotation.y, 6);
     void blinkers;
@@ -627,7 +627,7 @@ export class World {
       this.searchBeams.push(beam);
       this.scene.add(gunship.group);
       this.flyers.push({
-        group: gunship.group, blinkers: gunship.blinkers, radius: 95 + i * 38, height: 30 + i * 9,
+        group: gunship.group, blinkers: gunship.blinkers, gun: gunship.gun, radius: 95 + i * 38, height: 30 + i * 9,
         speed: (.075 - i * .012) * (i % 2 ? -1 : 1), phase: i * 2.1, center: new THREE.Vector2(10, -20), bank: i % 2 ? -.3 : .3,
       });
     }
@@ -659,7 +659,7 @@ export class World {
 
   /** Muzzle positions of the circling gunships' chin guns. */
   gunshipGuns(): THREE.Vector3[] {
-    return this.flyers.map((flyer) => flyer.group.localToWorld(new THREE.Vector3(0, 1, -7.5)));
+    return this.flyers.map((flyer) => flyer.gun.getWorldPosition(new THREE.Vector3()));
   }
 
   update(delta: number, time: number): void {
