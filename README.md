@@ -41,7 +41,7 @@ Kill enough droids in a sector and the survivors **fall back** to the next platf
 | G | Throw thermal detonator |
 | Shift | Sprint |
 | Space | Jump |
-| C / Ctrl | Crouch |
+| C | Crouch |
 | Escape | Pause |
 
 ## Run locally

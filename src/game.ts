@@ -198,7 +198,7 @@ export class KaminoGame {
       droidKilled: (actor, byPlayer, headshot) => this.onDroidKilled(actor, byPlayer, headshot),
       cloneKilled: () => this.onCloneKilled(),
       playerHit: (damage, from) => this.hurt(damage, from),
-      nearMiss: () => { this.effects.addShake(.08); },
+      nearMiss: (position) => { this.effects.addShake(.08); this.audio.whizz(position); },
       droidHitByPlayer: () => undefined,
     });
     await progress(.75, "Deploying the clone army…");
@@ -299,7 +299,6 @@ export class KaminoGame {
     const already = this.battle.aliveCount("separatist", spec.enemyZone);
     this.phase = { index, spec, spawned: already, supers: 0, killed: 0, state: "fight", reinforceTimer: 3, capture: 0, nextDeployed: false };
     for (let i = already; i < spec.initial; i++) this.deployDefender();
-    this.battle.moveAllies(this.front);
     this.showObjective();
     this.updateFrontHud();
   }
@@ -428,7 +427,8 @@ export class KaminoGame {
   }
 
   private start(): void {
-    this.audio.init();
+    // Test mode (automation) stays silent; real players start audio with the Deploy click.
+    if (!this.testMode) this.audio.init();
     if (!this.started) {
       this.started = true;
       this.placePlayerCamera();
@@ -507,14 +507,14 @@ export class KaminoGame {
     this.lookX = this.lookY = 0;
     this.audio.setListener(this.camera.position, this.camera.quaternion);
     this.audio.update(delta, this.health);
-    this.updateAmbientBattle(delta);
+    if (simulating || !this.started) this.updateAmbientBattle(delta);
     this.updateHudFrame(delta);
     this.render();
     this.watchPerformance();
   }
 
   private render(): void {
-    const shake = this.effects.shake + (this.dead ? 0 : 0);
+    const shake = this.effects.shake;
     const saved = this.camera.quaternion.clone();
     if (shake > 0) {
       const t = this.time * 38;
@@ -555,7 +555,8 @@ export class KaminoGame {
 
   private updatePlayer(delta: number): void {
     const nav = this.world.nav;
-    const wantCrouch = this.keys.has("KeyC") || this.keys.has("ControlLeft");
+    // C only: Ctrl would turn Ctrl+W into "close tab" mid-fight.
+    const wantCrouch = this.keys.has("KeyC");
     this.crouch = THREE.MathUtils.lerp(this.crouch, wantCrouch ? 1 : 0, Math.min(1, delta * 10));
     this.ads = THREE.MathUtils.lerp(this.ads, this.aiming && !this.isSprinting() ? 1 : 0, Math.min(1, delta * 12));
     const sprint = this.isSprinting();

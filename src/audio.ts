@@ -306,6 +306,23 @@ export class GameAudio {
     }
   }
 
+  /** A bolt snapping past the helmet. */
+  whizz(position: THREE.Vector3): void {
+    const out = this.spatial(position, 20, .1);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(2600 + Math.random() * 800, t);
+    osc.frequency.exponentialRampToValueAtTime(700, t + .16);
+    const band = ctx.createBiquadFilter();
+    band.type = "bandpass"; band.frequency.value = 2200; band.Q.value = 1.4;
+    osc.connect(band);
+    this.envelope(band, .16, .004, .16).connect(out);
+    osc.start(t); osc.stop(t + .2);
+  }
+
   /** Starfighter passing overhead: a falling engine whine over a rushing roar. */
   flyby(position: THREE.Vector3): void {
     const out = this.spatial(position, 220, .35);
