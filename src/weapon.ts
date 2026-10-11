@@ -25,8 +25,6 @@ export class Viewmodel {
   private readonly cell: THREE.Group;
   private readonly flash: THREE.Sprite;
   private readonly flashCross: THREE.Mesh;
-  /** Soft camera-side light so the first-person rifle keeps its shape in the storm. */
-  private readonly fill = new THREE.PointLight(0x9ed8ff, 7, 1.35, 2);
   private readonly light = new THREE.PointLight(0x6fd2ff, 0, 7, 2);
   private readonly display: CanvasRenderingContext2D;
   private readonly displayTexture: THREE.CanvasTexture;
@@ -139,8 +137,6 @@ export class Viewmodel {
     this.muzzle.add(this.flashCross);
     this.light.position.set(0, .05, -.85);
     g.add(this.light);
-    this.fill.position.set(.18, .12, .08);
-    g.add(this.fill);
 
     g.traverse((object) => {
       if (object instanceof THREE.Mesh) { object.castShadow = false; object.receiveShadow = false; object.frustumCulled = false; }
