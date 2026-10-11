@@ -289,8 +289,8 @@ export class Environment {
         void main() {
           float across = 1. - abs(vUv.x - .5) * 2.;
           float along = smoothstep(0., .35, vUv.y) * smoothstep(1., .6, vUv.y);
-          float a = across * along * vFade * .2;
-          gl_FragColor = vec4(vec3(.66, .8, .9) * (1. + uFlash * 3.), a);
+          float a = across * along * vFade * .13;
+          gl_FragColor = vec4(vec3(.58, .72, .82) * (1. + uFlash * 1.5), a);
         }`,
     });
     const mesh = new THREE.Mesh(geometry, material);
@@ -301,7 +301,7 @@ export class Environment {
 
   /** Distant rain: scrolling streak curtains on cylinders around the camera, beyond the particle rain. */
   private buildRainCurtains(): void {
-    for (const [radius, opacity, density] of [[34, .16, 300], [70, .12, 520], [130, .1, 900]] as const) {
+    for (const [radius, opacity, density] of [[34, .085, 300], [70, .055, 520], [130, .035, 900]] as const) {
       const material = new THREE.ShaderMaterial({
         transparent: true,
         depthWrite: false,
@@ -325,7 +325,7 @@ export class Environment {
             float keep = step(.45, hash(column + 7.31));
             float fade = smoothstep(0., .25, vUv.y) * smoothstep(1., .6, vUv.y);
             float a = streak * across * keep * fade * uOpacity;
-            gl_FragColor = vec4(vec3(.62, .76, .86) * (1. + uFlash * 4.) * a, 1.);
+            gl_FragColor = vec4(vec3(.58, .72, .82) * (1. + uFlash * 1.8), a);
           }`,
       });
       const curtain = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 70, 48, 1, true), material);

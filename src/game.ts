@@ -115,12 +115,12 @@ const GRADE_SHADER = {
       uv += (vUv - .5) * .07 * sr * sr * uScope;
       vec2 c = uv - .5;
       float r2 = dot(c, c);
-      float ca = (.0012 + uDamage * .006) * (1. + r2 * 4.) + pow(min(sr, 1.2), 4.) * .018 * uScope;
+      float ca = (.00045 + uDamage * .003) * (1. + r2 * 3.) + pow(min(sr, 1.2), 4.) * .009 * uScope;
       vec3 col;
       col.r = texture2D(tDiffuse, uv + c * ca).r;
       col.g = texture2D(tDiffuse, uv).g;
       col.b = texture2D(tDiffuse, uv - c * ca).b;
-      col += rain.z * .05;
+      col += rain.z * .025;
       float luma = dot(col, vec3(.299, .587, .114));
       // Cool shadows, slightly warm highlights.
       col += vec3(-.006, .004, .014) * (1. - luma);
@@ -162,7 +162,7 @@ const GRADE_SHADER = {
         col += vec3(.5, .06, .02) * smoothstep(.04, 0., length(q)) * .25 * smoothstep(.6, 1., uScope);
       }
       col += uFlash * vec3(.05, .07, .09);
-      col += (hash(vUv * 931.) - .5) * .028;
+      col += (hash(vUv * 931.) - .5) * .012;
       gl_FragColor = vec4(col, 1.);
     }`,
 };
@@ -383,7 +383,7 @@ export class KaminoGame {
           gl_FragColor = vec4(clamp(c.rgb, vec3(0.), vec3(40.)), c.a);
         }`,
     }));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .38, .45, 1);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .24, .35, 1.2);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
     this.grade = new ShaderPass(GRADE_SHADER);
@@ -693,7 +693,7 @@ export class KaminoGame {
     this.reflections.render(this.renderer, this.scene, this.camera, hidden);
     this.updateVolumeLights();
     this.compositePass.ads = this.ads * (1 - this.scope);
-    (this.grade.uniforms.uRain as THREE.IUniform).value = this.started ? .55 + Math.max(0, this.camera.rotation.x) * .6 : .35;
+    (this.grade.uniforms.uRain as THREE.IUniform).value = this.started ? .32 + Math.max(0, this.camera.rotation.x) * .25 : .2;
     this.composer.render(this.renderDelta);
     this.camera.quaternion.copy(saved);
   }
