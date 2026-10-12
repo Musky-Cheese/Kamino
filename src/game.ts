@@ -1103,7 +1103,8 @@ export class KaminoGame {
     this.updateHud();
     const lines = [
       ["Command · Tipoca", "Besh Junction is ours. Keep pushing—Cresh Plaza is next. Expect super battle droids."],
-      ["Command · Tipoca", "Cresh Plaza secure. Their landing craft is on Dorn platform. Clear it and Kamino is ours."],
+      ["Command · Tipoca", "Cresh Plaza secure. The landing district is ahead. Their assault force is massing around Dorn."],
+      ["Command · Tipoca", "Dorn is ours. The surviving droids are sealing themselves inside the cloning facility. Finish this indoors."],
     ];
     const line = lines[p.index];
     if (line) this.radio(line[0], line[1]);
@@ -1236,7 +1237,7 @@ export class KaminoGame {
   private victory(): void {
     if (this.ended) return;
     this.phase.state = "secured";
-    this.front = 3;
+    this.front = ZONES.length - 1;
     this.updateFrontHud();
     this.audio.ui("secured");
     this.banner("Victory", "Tipoca City holds");
@@ -1254,7 +1255,7 @@ export class KaminoGame {
     this.$("#result-title").textContent = victory ? "TIPOCA CITY HOLDS" : "CLONE DOWN";
     this.$("#result-copy").textContent = victory
       ? "You fought from Aurek pad to the Separatist landing craft and pushed the droid army off Tipoca City."
-      : `You fell holding the line at ${ZONES[Math.min(3, this.front + 1)].name}. The clones will need you back in the fight.`;
+      : `You fell holding the line at ${ZONES[Math.min(ZONES.length - 1, this.front + 1)].name}. The clones will need you back in the fight.`;
     const minutes = Math.floor(this.missionTime / 60), seconds = Math.floor(this.missionTime % 60);
     const accuracy = this.shotsFired ? Math.round(this.shotsHit / this.shotsFired * 100) : 0;
     this.$("#result-stats").innerHTML = [

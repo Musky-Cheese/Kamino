@@ -95,9 +95,12 @@ export class Battle {
   readonly targetMeshes: THREE.Mesh[] = [];
   private readonly bolts: Bolt[] = [];
   private readonly boltPools: Record<Team, THREE.Mesh[]> = { republic: [], separatist: [] };
-  private readonly boltGeometry = new THREE.CapsuleGeometry(.04, 1.5, 4, 8).rotateX(Math.PI / 2);
-  private readonly haloGeometry = new THREE.CapsuleGeometry(.14, 1.6, 4, 10).rotateX(Math.PI / 2);
-  private readonly boltMaterials: Record<Team, { core: THREE.MeshBasicMaterial; halo: THREE.MeshBasicMaterial }>;
+  // Keep the coloured light close to the bolt. A broad additive capsule turns into a soft
+  // smear once bloom is applied, especially against the pale storm sky.
+  private readonly boltGeometry = new THREE.CapsuleGeometry(.024, 1.5, 4, 8).rotateX(Math.PI / 2);
+  private readonly innerGlowGeometry = new THREE.CapsuleGeometry(.058, 1.62, 4, 8).rotateX(Math.PI / 2);
+  private readonly outerGlowGeometry = new THREE.CapsuleGeometry(.105, 1.82, 4, 10).rotateX(Math.PI / 2);
+  private readonly boltMaterials: Record<Team, { core: THREE.MeshBasicMaterial; inner: THREE.MeshBasicMaterial; outer: THREE.MeshBasicMaterial }>;
   private readonly nav: Navigation;
   private readonly tmp = new THREE.Vector3();
   private cloneVariant = 0;
@@ -112,21 +115,33 @@ export class Battle {
     private readonly events: BattleEvents,
   ) {
     this.nav = world.nav;
-    const halo = (color: THREE.Color) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .55, blending: THREE.AdditiveBlending, depthWrite: false });
+    const glow = (color: THREE.Color, opacity: number) => new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+    });
     this.boltMaterials = {
-      separatist: { core: new THREE.MeshBasicMaterial({ color: new THREE.Color(12, 4, 3) }), halo: halo(BOLT_COLORS.red.clone().multiplyScalar(.35)) },
-      republic: { core: new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 7, 12) }), halo: halo(BOLT_COLORS.blue.clone().multiplyScalar(.35)) },
+      separatist: {
+        core: new THREE.MeshBasicMaterial({ color: new THREE.Color(18, 9, 7), toneMapped: false }),
+        inner: glow(BOLT_COLORS.red.clone().multiplyScalar(.55), .72),
+        outer: glow(BOLT_COLORS.red.clone().multiplyScalar(.12), .28),
+      },
+      republic: {
+        core: new THREE.MeshBasicMaterial({ color: new THREE.Color(7, 13, 18), toneMapped: false }),
+        inner: glow(BOLT_COLORS.blue.clone().multiplyScalar(.55), .72),
+        outer: glow(BOLT_COLORS.blue.clone().multiplyScalar(.12), .28),
+      },
     };
   }
 
-  /** A hot white-ish core inside a coloured additive halo; bloom does the rest. */
+  /** A thin, bright core keeps the bolt readable; two restrained coloured layers sell its energy. */
   private boltMesh(team: Team): THREE.Mesh {
     const pooled = this.boltPools[team].pop();
     if (pooled) return pooled;
     const mesh = new THREE.Mesh(this.boltGeometry, this.boltMaterials[team].core);
-    const glow = new THREE.Mesh(this.haloGeometry, this.boltMaterials[team].halo);
-    glow.renderOrder = 6;
-    mesh.add(glow);
+    const inner = new THREE.Mesh(this.innerGlowGeometry, this.boltMaterials[team].inner);
+    const outer = new THREE.Mesh(this.outerGlowGeometry, this.boltMaterials[team].outer);
+    inner.renderOrder = 6;
+    outer.renderOrder = 5;
+    mesh.add(inner, outer);
     return mesh;
   }
 

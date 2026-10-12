@@ -2,7 +2,7 @@ import * as THREE from "three";
 
 /** Battlefield layout. The front runs along -Z: the player starts on Aurek pad and pushes the droids back to Dorn landing. */
 
-export type ZoneId = "A" | "B" | "C" | "D";
+export type ZoneId = "A" | "B" | "C" | "D" | "E";
 
 export type CoverSpec = { kind: "barricade" | "crate" | "pod" | "dais"; x: number; z: number; rotation?: number };
 
@@ -66,14 +66,29 @@ export const ZONES: Zone[] = [
   {
     id: "D",
     name: "Dorn Landing Platform",
-    center: v(2, -80),
-    radius: 20,
-    capture: v(2, -67),
+    center: v(2, -82),
+    radius: 29,
+    capture: v(2, -62),
     cover: [
-      { kind: "barricade", x: -8, z: 6 }, { kind: "barricade", x: 8, z: 7 }, { kind: "barricade", x: -13, z: -4, rotation: .9 },
-      { kind: "barricade", x: 14, z: -3, rotation: -.9 }, { kind: "crate", x: -4, z: 14 }, { kind: "crate", x: 6, z: 13.5 },
-      { kind: "crate", x: -14, z: 6 }, { kind: "pod", x: 15, z: 7 }, { kind: "barricade", x: -3, z: 2 },
-      { kind: "barricade", x: 7, z: 1, rotation: .3 },
+      { kind: "barricade", x: -9, z: 15 }, { kind: "barricade", x: 9, z: 15 }, { kind: "barricade", x: -19, z: 3, rotation: .9 },
+      { kind: "barricade", x: 20, z: 2, rotation: -.9 }, { kind: "crate", x: -7, z: 20 }, { kind: "crate", x: 7, z: 20 },
+      { kind: "crate", x: -19, z: 11 }, { kind: "pod", x: 20, z: 12 }, { kind: "barricade", x: -6, z: 3 },
+      { kind: "barricade", x: 8, z: 2, rotation: .3 }, { kind: "pod", x: -18, z: -9 }, { kind: "pod", x: 19, z: -11 },
+      { kind: "barricade", x: -13, z: -17, rotation: -.4 }, { kind: "barricade", x: 14, z: -17, rotation: .35 },
+      { kind: "crate", x: -5, z: -22 }, { kind: "crate", x: 6, z: -22 },
+    ],
+  },
+  {
+    id: "E",
+    name: "Tipoca Cloning Facility",
+    center: v(2, -142),
+    radius: 27,
+    capture: v(2, -146),
+    cover: [
+      { kind: "barricade", x: -9, z: 10 }, { kind: "barricade", x: 9, z: 10 }, { kind: "pod", x: -15, z: 1 },
+      { kind: "pod", x: 15, z: 1 }, { kind: "crate", x: -8, z: -7 }, { kind: "crate", x: 8, z: -7 },
+      { kind: "barricade", x: -11, z: -14, rotation: .3 }, { kind: "barricade", x: 11, z: -14, rotation: -.3 },
+      { kind: "barricade", x: 0, z: -18 },
     ],
   },
 ];
@@ -85,6 +100,8 @@ export const BRIDGES: Bridge[] = [
   { from: 1, to: 2, a: v(9, 8), b: v(7, -19), halfWidth: 1.8, main: false },
   { from: 2, to: 3, a: v(-3, -43), b: v(0, -63), halfWidth: 3, main: true },
   { from: 2, to: 3, a: v(-15, -38), b: v(-11, -68), halfWidth: 1.8, main: false },
+  { from: 3, to: 4, a: v(2, -110), b: v(2, -115), halfWidth: 4, main: true },
+  { from: 3, to: 4, a: v(-17, -101), b: v(-18, -122), halfWidth: 1.8, main: false },
 ];
 
 /** Raised central dais in Cresh Plaza. */
@@ -98,9 +115,10 @@ export const PLAYER_START = new THREE.Vector3(5, 0, 74.5);
 export type PhaseSpec = { enemyZone: number; quota: number; maxAlive: number; superDroids: number; initial: number };
 
 export const PHASES: PhaseSpec[] = [
-  { enemyZone: 1, quota: 11, maxAlive: 6, superDroids: 0, initial: 6 },
-  { enemyZone: 2, quota: 16, maxAlive: 8, superDroids: 2, initial: 6 },
-  { enemyZone: 3, quota: 22, maxAlive: 10, superDroids: 5, initial: 7 },
+  { enemyZone: 1, quota: 14, maxAlive: 7, superDroids: 0, initial: 7 },
+  { enemyZone: 2, quota: 20, maxAlive: 9, superDroids: 2, initial: 7 },
+  { enemyZone: 3, quota: 30, maxAlive: 12, superDroids: 5, initial: 10 },
+  { enemyZone: 4, quota: 24, maxAlive: 10, superDroids: 6, initial: 8 },
 ];
 
 export const OCEAN_LEVEL = -38;
