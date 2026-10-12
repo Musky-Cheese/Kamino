@@ -7,7 +7,7 @@ import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import type { ActorKind } from "./actors";
 import { GameAudio } from "./audio";
 import { Actor, Battle, type Target } from "./battle";
-import { BRIDGES, LANDER, PHASES, PLAYER_START, ZONES, type PhaseSpec, type Quality } from "./config";
+import { BRIDGES, PHASES, PLAYER_START, ZONES, type PhaseSpec, type Quality } from "./config";
 import { BOLT_COLORS, Effects } from "./effects";
 import { Environment } from "./environment";
 import { Materials } from "./materials";
@@ -452,8 +452,9 @@ export class KaminoGame {
     const zone = this.phase.spec.enemyZone;
     let from: THREE.Vector2, fromZone: number;
     if (zone >= 2) {
-      from = LANDER.ramp.clone().add(new THREE.Vector2((Math.random() - .5) * 2, Math.random() * 2));
-      fromZone = 3;
+      this.battle.deployFromLander(this.nextKind(), zone);
+      this.phase.spawned++;
+      return;
     } else {
       const bridge = BRIDGES.filter((b) => b.from === zone)[Math.floor(Math.random() * 2)];
       const center = ZONES[zone + 1].center;
@@ -1085,7 +1086,7 @@ export class KaminoGame {
     const present = this.battle.aliveCount("separatist", next.enemyZone);
     for (let i = present; i < next.initial; i++) {
       const kind: ActorKind = i === next.initial - 1 && next.superDroids > 0 ? "b2" : "b1";
-      this.battle.deployDefender(kind, next.enemyZone);
+      this.battle.deployFromLander(kind, next.enemyZone, i - present);
     }
   }
 
@@ -1265,7 +1266,7 @@ export class KaminoGame {
   }
 
   private onDroidKilled(actor: Actor, byPlayer: boolean, headshot: boolean): void {
-    this.phase.killed++;
+    if (actor.zone === this.phase.spec.enemyZone) this.phase.killed++;
     if (!byPlayer) return;
     this.kills++;
     if (headshot) this.headshots++;

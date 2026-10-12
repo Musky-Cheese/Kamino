@@ -64,6 +64,11 @@ export class World {
   readonly crashSmokeOrigin = new THREE.Vector3();
   /** Spots around the city where the wider battle flares up (for ambient fire and explosions). */
   readonly ambientPoints: THREE.Vector3[] = [];
+  /** Doorway-to-deck route used to make reinforcements visibly walk out of the lander. */
+  readonly landerDeployment = {
+    start: new THREE.Vector3(LANDER.x, 1.9, LANDER.z + 8),
+    exit: new THREE.Vector3(LANDER.x, 0, LANDER.z + 15),
+  };
   private readonly blinkers: THREE.Mesh[] = [];
   private readonly flyers: Flyer[] = [];
   private readonly smoke: Array<{ sprite: THREE.Sprite; age: number; life: number; velocity: THREE.Vector3; start: THREE.Vector3 }> = [];
@@ -450,7 +455,7 @@ export class World {
   }
 
   private parkedLander(): void {
-    const { group, lights, solids, rampEnd } = buildLander(this.m);
+    const { group, lights, solids, rampEnd, rampStart, rampHeight } = buildLander(this.m);
     group.position.set(LANDER.x, 0, LANDER.z);
     this.batcher.addObject(group, { cast: true, uvScale: 1 / 5 });
     void lights;
@@ -460,6 +465,9 @@ export class World {
     }
     // Ramp side rails keep droids flowing out of the front.
     for (const s of [-1, 1]) this.nav.addBox(LANDER.x + s * 1.9, LANDER.z + rampEnd - 3.5, .4, 7, 0, 2);
+    // Begin just inside the hold so the hull hides creation; the first visible frame is an exit.
+    this.landerDeployment.start.set(LANDER.x, rampHeight, LANDER.z + rampStart - .8);
+    this.landerDeployment.exit.set(LANDER.x, 0, LANDER.z + rampEnd + .15);
     const interior = new THREE.PointLight(0xff9a50, 30, 14, 2);
     interior.position.set(LANDER.x, 2.6, LANDER.z + rampEnd - 5.5);
     this.scene.add(interior);

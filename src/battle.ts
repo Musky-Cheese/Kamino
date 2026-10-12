@@ -18,7 +18,14 @@ export type Target = {
   isPlayer: boolean;
 };
 
-type ActorState = "path" | "hold" | "advance" | "retreat" | "dead";
+type ActorState = "deploy" | "path" | "hold" | "advance" | "retreat" | "dead";
+
+type Deployment = {
+  start: THREE.Vector3;
+  exit: THREE.Vector3;
+  targetZone: number;
+  preferSide: boolean;
+};
 
 const STATS: Record<ActorKind, { hp: number; walk: number; run: number; radius: number; burst: number; burstGap: number; cooldown: [number, number]; spread: number; damage: number; voice: BlasterVoice; boltSpeed: number }> = {
   b1: { hp: 70, walk: 2.3, run: 4.2, radius: .34, burst: 3, burstGap: .2, cooldown: [1.6, 3], spread: 3.1, damage: 5.5, voice: "droid", boltSpeed: 70 },
@@ -52,6 +59,7 @@ export class Actor implements Target {
   peekOffset = 0;
   deadTime = 0;
   aggressive = false;
+  deployment: Deployment | null = null;
   readonly lastPosition = new THREE.Vector3();
 
   constructor(readonly kind: ActorKind, readonly team: Team, readonly rig: Rig, zone: number) {
@@ -178,6 +186,25 @@ export class Battle {
     this.sendTo(actor, zone, this.world.enemyCover[zone], Math.random() < .5);
     actor.aggressive = kind === "b2" || Math.random() < .2;
     if (Math.random() < .3) this.audio.rogerRoger(actor.position);
+    return actor;
+  }
+
+  /** Walk a reinforcement out of the landing craft before handing it to normal navigation. */
+  deployFromLander(kind: ActorKind, zone: number, stagger = 0): Actor {
+    const start = this.world.landerDeployment.start.clone();
+    const exit = this.world.landerDeployment.exit.clone();
+    const lateral = (Math.random() - .5) * 1.2;
+    start.x += lateral;
+    exit.x += lateral * .45;
+    // Stagger a group back into the hold instead of stacking every droid in the doorway.
+    start.z -= stagger * .85;
+    const actor = this.spawn(kind, new THREE.Vector2(start.x, start.z), 3);
+    actor.position.y = start.y;
+    actor.lastPosition.copy(actor.position);
+    actor.zone = zone;
+    actor.state = "deploy";
+    actor.deployment = { start, exit, targetZone: zone, preferSide: Math.random() < .5 };
+    actor.aggressive = kind === "b2" || Math.random() < .2;
     return actor;
   }
 
@@ -368,9 +395,30 @@ export class Battle {
     }
     const target = actor.target;
     let speed = 0;
+    let moved = 0;
     let goal: THREE.Vector2 | null = null;
 
-    if (actor.state === "path" || actor.state === "retreat") {
+    if (actor.state === "deploy" && actor.deployment) {
+      const deployment = actor.deployment;
+      const dx = deployment.exit.x - actor.position.x, dz = deployment.exit.z - actor.position.z;
+      const distance = Math.hypot(dx, dz);
+      const total = Math.max(.01, deployment.start.distanceTo(deployment.exit));
+      const step = Math.min(distance, stats.walk * 1.05 * delta);
+      if (distance > .08) {
+        const before = actor.position.clone();
+        actor.position.x += dx / distance * step;
+        actor.position.z += dz / distance * step;
+        const progress = THREE.MathUtils.clamp(1 - distance / total, 0, 1);
+        actor.position.y = THREE.MathUtils.lerp(deployment.start.y, deployment.exit.y, progress);
+        moved = before.distanceTo(actor.position);
+        actor.velocity.subVectors(actor.position, before).divideScalar(Math.max(delta, 1e-4));
+        goal = new THREE.Vector2(deployment.exit.x, deployment.exit.z);
+      } else {
+        actor.position.copy(deployment.exit);
+        actor.deployment = null;
+        this.sendTo(actor, deployment.targetZone, this.world.enemyCover[deployment.targetZone], deployment.preferSide);
+      }
+    } else if (actor.state === "path" || actor.state === "retreat") {
       goal = actor.path[0] ?? null;
       if (goal && Math.hypot(goal.x - actor.position.x, goal.y - actor.position.z) < (actor.path.length > 1 ? 1.4 : .5)) {
         actor.path.shift();
@@ -407,8 +455,9 @@ export class Battle {
     }
 
     // Locomotion.
-    let moved = 0;
-    if (goal && speed > 0) {
+    if (actor.state === "deploy") {
+      // The scripted ramp walk above already supplied this frame's movement.
+    } else if (goal && speed > 0) {
       const dx = goal.x - actor.position.x, dz = goal.y - actor.position.z;
       const distance = Math.hypot(dx, dz);
       const step = Math.min(distance, speed * delta);
@@ -437,13 +486,17 @@ export class Battle {
         }
       }
     } else actor.velocity.set(0, 0, 0);
-    const ground = this.nav.supportAt(actor.position.x, actor.position.z, actor.radius * .6) ?? actor.position.y;
-    actor.position.y = THREE.MathUtils.lerp(actor.position.y, ground, Math.min(1, delta * 12));
+    if (actor.state !== "deploy") {
+      const ground = this.nav.supportAt(actor.position.x, actor.position.z, actor.radius * .6) ?? actor.position.y;
+      actor.position.y = THREE.MathUtils.lerp(actor.position.y, ground, Math.min(1, delta * 12));
+    }
 
     // Facing and aim.
     let facing = actor.rig.root.rotation.y;
     let aimPitch = 0;
-    if (target && (actor.state !== "retreat" && actor.state !== "path" || moved < .02 || actor.team === "republic" || actor.aggressive)) {
+    if (actor.state === "deploy" && goal) {
+      facing = Math.atan2(goal.x - actor.position.x, goal.y - actor.position.z);
+    } else if (target && (actor.state !== "retreat" && actor.state !== "path" || moved < .02 || actor.team === "republic" || actor.aggressive)) {
       const dx = target.position.x - actor.position.x, dz = target.position.z - actor.position.z;
       facing = Math.atan2(dx, dz);
       const dy = target.position.y + target.height * .6 - (actor.position.y + actor.height * .75);
@@ -453,7 +506,7 @@ export class Battle {
     actor.aimPitch = THREE.MathUtils.lerp(actor.aimPitch, aimPitch, Math.min(1, delta * 6));
 
     // Shooting.
-    const canShoot = target && actor.state !== "retreat" && (actor.state !== "path" || actor.team === "republic" || actor.aggressive);
+    const canShoot = target && actor.state !== "deploy" && actor.state !== "retreat" && (actor.state !== "path" || actor.team === "republic" || actor.aggressive);
     actor.fireTimer -= delta;
     let firing = false;
     if (canShoot && actor.fireTimer <= 0 && target) {
@@ -509,10 +562,10 @@ export class Battle {
     const list = this.actors;
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
-      if (!a.alive) continue;
+      if (!a.alive || a.state === "deploy") continue;
       for (let j = i + 1; j < list.length; j++) {
         const b = list[j];
-        if (!b.alive) continue;
+        if (!b.alive || b.state === "deploy") continue;
         const dx = b.position.x - a.position.x, dz = b.position.z - a.position.z;
         const d = Math.hypot(dx, dz), min = a.radius + b.radius + .15;
         if (d > 1e-4 && d < min) {

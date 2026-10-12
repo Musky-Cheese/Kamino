@@ -199,6 +199,9 @@ export type Lander = {
   solids: THREE.Box3[];
   /** Local z where the boarding ramp meets the deck. */
   rampEnd: number;
+  /** Local z and deck height at the doorway end of the boarding ramp. */
+  rampStart: number;
+  rampHeight: number;
 };
 
 const luminance = (c: THREE.Color) => c.r * .3 + c.g * .59 + c.b * .11;
@@ -257,7 +260,7 @@ export function buildLander(m: Materials, crashed = false): Lander {
       const fire = mesh(g, new THREE.SphereGeometry(s, 10, 8), m.fireGlow, c.x + x * fuselage.max.x, c.y + y, c.z + z * (front - c.z));
       fire.scale.y = .4;
     }
-    return { group: g, lights, solids: [fuselage], rampEnd: front };
+    return { group: g, lights, solids: [fuselage], rampEnd: front, rampStart: front, rampHeight: sill };
   }
   // Boarding ramp from the nose down to the deck, and a lit hold behind it.
   const run = Math.max(2.5, sill * 2.6);
@@ -265,7 +268,7 @@ export function buildLander(m: Materials, crashed = false): Lander {
   ramp.castShadow = true;
   const width = fuselage.max.x - fuselage.min.x;
   mesh(g, new THREE.BoxGeometry(Math.min(2.4, width * .8), .08, .08), m.amberLight, 0, sill + 1.9, front - .05);
-  return { group: g, lights, solids: [fuselage, ...groundContacts(g, .5)], rampEnd: front + run };
+  return { group: g, lights, solids: [fuselage, ...groundContacts(g, .5)], rampEnd: front + run, rampStart: front, rampHeight: sill };
 }
 
 function buildProceduralLander(m: Materials, crashed: boolean): Lander {
@@ -327,5 +330,5 @@ function buildProceduralLander(m: Materials, crashed: boolean): Lander {
   }
   const box = (x: number, z: number, w: number, l: number, h: number) => new THREE.Box3(new THREE.Vector3(x - w / 2, 0, z - l / 2), new THREE.Vector3(x + w / 2, h, z + l / 2));
   const solids = [box(0, -.5, 7.4, 20, 7), box(-10.8, -2.4, 2, 2, 5), box(10.8, -2.4, 2, 2, 5)];
-  return { group: g, lights, solids, rampEnd: 15 };
+  return { group: g, lights, solids, rampEnd: 15, rampStart: 8, rampHeight: 1.9 };
 }
