@@ -245,7 +245,9 @@ export class KaminoGame {
   private shotsHit = 0;
   private alliesLost = 0;
   private quality: Quality;
-  private testMode = new URLSearchParams(location.search).has("test");
+  private readonly launchParams = new URLSearchParams(location.search);
+  private testMode = this.launchParams.has("test");
+  private readonly startAtFinal = this.launchParams.get("start") === "final";
   private radioQueue: Array<{ from: string; text: string }> = [];
   private radioTimer = 0;
   private bannerTimer = 0;
@@ -416,6 +418,17 @@ export class KaminoGame {
   }
 
   private setupMission(): void {
+    if (this.startAtFinal) {
+      // Put the squad at the Dorn/Tipoca approach, with the first three sectors already secured.
+      this.feet.set(2, this.world.nav.heightAt(2, -120) ?? 0, -120);
+      const allyStarts = [[-1, -119], [5, -120], [-3, -123], [7, -124]];
+      allyStarts.forEach(([x, z]) => this.battle.spawnClone(new THREE.Vector2(x, z), 4));
+      this.front = 3;
+      this.startPhase(PHASES.length - 1);
+      this.$("#menu .mission-copy").textContent = "Dorn is secure, but the surviving droids have sealed themselves inside the Tipoca cloning facility. Join the squad at the final approach and finish the assault.";
+      this.$("#start").textContent = "Deploy to final sector";
+      return;
+    }
     // Squad on Aurek pad.
     const allyStarts = [[-2, 67], [2.5, 67.5], [-3.5, 71], [8.5, 68.5]];
     allyStarts.forEach(([x, z]) => this.battle.spawnClone(new THREE.Vector2(x, z), 0));
@@ -574,10 +587,15 @@ export class KaminoGame {
     if (!this.started) {
       this.started = true;
       this.placePlayerCamera();
-      this.radio("Command · Tipoca", "All units: droids have overrun Besh Junction. Push across the bridges and drive them back!");
-      this.radio("Sergeant", "On me, trooper. Watch those bridges—there's no cover out there.");
+      if (this.startAtFinal) {
+        this.radio("Command · Tipoca", "Dorn is secure. The remaining droids are entrenched inside the cloning facility.");
+        this.radio("Sergeant", "Final push, trooper. Cross the approach and finish this.");
+      } else {
+        this.radio("Command · Tipoca", "All units: droids have overrun Besh Junction. Push across the bridges and drive them back!");
+        this.radio("Sergeant", "On me, trooper. Watch those bridges—there's no cover out there.");
+      }
       this.radio("Sergeant", "Aim with right click, and crouch behind the barricades with C. Your armor recovers if you stay out of fire.");
-      this.banner("The Battle of Kamino", "Push them back");
+      this.banner(this.startAtFinal ? "Final assault" : "The Battle of Kamino", this.startAtFinal ? "Take Tipoca" : "Push them back");
     }
     if (this.testMode) {
       this.$("#menu").classList.add("hidden");
@@ -600,7 +618,8 @@ export class KaminoGame {
   /** Put the camera back behind the trooper's eyes when the mission begins. */
   private placePlayerCamera(): void {
     this.camera.position.copy(this.feet).setY(this.feet.y + EYE_HEIGHT);
-    this.camera.lookAt(0, 1.5, 30);
+    const objective = ZONES[this.phase.spec.enemyZone].center;
+    this.camera.lookAt(objective.x, 1.5, objective.y);
     this.viewmodel.root.visible = true;
   }
 
