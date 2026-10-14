@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { buildRig, type ActorKind, type Rig } from "./actors";
 import type { BlasterVoice, GameAudio } from "./audio";
-import { ZONES } from "./config";
+import { ZONES, type SpawnDoor } from "./config";
 import { BOLT_COLORS, Effects } from "./effects";
 import type { Navigation } from "./navigation";
 import type { CoverPoint, World } from "./world";
@@ -55,6 +55,8 @@ export class Actor implements Target {
   aimPitch = 0;
   stuckTimer = 0;
   bestDistance = Infinity;
+  /** Which way to slide around an obstacle; kept until that way is blocked too, so actors follow walls. */
+  sidestep = Math.random() < .5 ? 1 : -1;
   peekTimer = Math.random() * 3;
   peekOffset = 0;
   deadTime = 0;
@@ -198,7 +200,18 @@ export class Battle {
     exit.x += lateral * .45;
     // Stagger a group back into the hold instead of stacking every droid in the doorway.
     start.z -= stagger * .85;
-    const actor = this.spawn(kind, new THREE.Vector2(start.x, start.z), 3);
+    return this.deployAlong(kind, start, exit, 3, zone);
+  }
+
+  /** Walk a reinforcement out of a service door in an indoor sector. */
+  deployFromDoor(kind: ActorKind, door: SpawnDoor, zone: number): Actor {
+    const start = new THREE.Vector3(door.start.x, 0, door.start.y);
+    const exit = new THREE.Vector3(door.exit.x, 0, door.exit.y);
+    return this.deployAlong(kind, start, exit, zone, zone);
+  }
+
+  private deployAlong(kind: ActorKind, start: THREE.Vector3, exit: THREE.Vector3, spawnZone: number, zone: number): Actor {
+    const actor = this.spawn(kind, new THREE.Vector2(start.x, start.z), spawnZone);
     actor.position.y = start.y;
     actor.lastPosition.copy(actor.position);
     actor.zone = zone;
@@ -265,8 +278,14 @@ export class Battle {
   randomPointInZone(zone: number, side: number): THREE.Vector2 {
     const z = ZONES[zone];
     for (let i = 0; i < 30; i++) {
-      const angle = Math.random() * Math.PI * 2, radius = Math.sqrt(Math.random()) * (z.radius - 2.5);
-      const p = new THREE.Vector2(z.center.x + Math.cos(angle) * radius, z.center.y + Math.sin(angle) * radius * .6 + side * z.radius * .3);
+      let p: THREE.Vector2;
+      if (z.room) {
+        const along = (Math.random() * 2 - 1) * .6 + side * .3;
+        p = new THREE.Vector2(z.center.x + (Math.random() * 2 - 1) * (z.room.hw - 1.5), z.center.y + along * (z.room.hd - 1.5));
+      } else {
+        const angle = Math.random() * Math.PI * 2, radius = Math.sqrt(Math.random()) * (z.radius - 2.5);
+        p = new THREE.Vector2(z.center.x + Math.cos(angle) * radius, z.center.y + Math.sin(angle) * radius * .6 + side * z.radius * .3);
+      }
       if (this.nav.canStand(p.x, p.y, .4, this.nav.groundAt(p.x, p.y) ?? 0)) return p;
     }
     return z.center.clone();
@@ -463,11 +482,13 @@ export class Battle {
       const step = Math.min(distance, speed * delta);
       if (distance > 1e-3) {
         const before = actor.position.clone();
-        if (!this.nav.move(actor.position, dx / distance * step, dz / distance * step, actor.radius)) {
-          // Sidestep around whatever blocks the straight line.
+        const startX = actor.position.x, startZ = actor.position.z;
+        this.nav.move(actor.position, dx / distance * step, dz / distance * step, actor.radius);
+        // Barely sliding along an obstacle head-on counts as blocked.
+        if (Math.hypot(actor.position.x - startX, actor.position.z - startZ) < step * .3) {
+          // Sidestep around whatever blocks the straight line, turning back only at a dead end.
           const sx = -dz / distance, sz = dx / distance;
-          const dir = Math.sin(time * .7 + actor.walkPhase) > 0 ? 1 : -1;
-          this.nav.move(actor.position, sx * dir * step, sz * dir * step, actor.radius);
+          if (!this.nav.move(actor.position, sx * actor.sidestep * step, sz * actor.sidestep * step, actor.radius)) actor.sidestep *= -1;
         }
         moved = before.distanceTo(actor.position);
         actor.velocity.subVectors(actor.position, before).divideScalar(Math.max(delta, 1e-4));

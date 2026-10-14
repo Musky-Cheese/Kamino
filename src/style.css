@@ -69,7 +69,7 @@ kbd { display: block; margin-bottom: 3px; color: #effaff; font: 700 .74rem/1.2 I
 #front .node span { transform: rotate(-45deg); }
 #front .node.ours { border-color: var(--cyan); color: #04121a; background: var(--cyan); box-shadow: 0 0 16px rgba(111, 216, 255, .55); }
 #front .node.contested { border-color: var(--amber); color: var(--amber); background: rgba(48, 28, 4, .6); animation: pulse 1s infinite; }
-#front .link { width: 64px; height: 3px; margin: 0 6px; background: rgba(255, 92, 69, .45); overflow: hidden; }
+#front .link { width: 46px; height: 3px; margin: 0 6px; background: rgba(255, 92, 69, .45); overflow: hidden; }
 #front .link i { display: block; height: 100%; width: 0; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); transition: width .5s; }
 #front .label { position: absolute; top: 46px; left: 50%; transform: translateX(-50%); white-space: nowrap; }
 @keyframes pulse { 50% { box-shadow: 0 0 18px rgba(255, 179, 92, .8); } }
@@ -157,5 +157,5 @@ kbd { display: block; margin-bottom: 3px; color: #effaff; font: 700 .74rem/1.2 I
   .meter { width: 150px; }
   #squad { left: 12px; bottom: 100px; }
   .ammo { right: 12px; bottom: 12px; min-width: 140px; }
-  #front .link { width: 34px; }
+  #front .link { width: 20px; }
 }

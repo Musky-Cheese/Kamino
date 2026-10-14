@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import { StaticBatcher } from "./batcher";
-import { BRIDGES, DAIS, LANDER, OCEAN_LEVEL, ZONES, type Bridge, type Zone } from "./config";
+import { StaticBatcher, type BatchOptions } from "./batcher";
+import { BRIDGES, CONTROL_DECK, DAIS, LANDER, OCEAN_LEVEL, ZONES, type Bridge, type Zone } from "./config";
 import type { Materials } from "./materials";
-import { Navigation } from "./navigation";
+import { Navigation, type Blocker } from "./navigation";
 import { rng, smokeTexture } from "./textures";
 import { buildGunship, buildLander, taperedBox } from "./vehicles";
 
@@ -11,6 +11,20 @@ import { buildGunship, buildLander, taperedBox } from "./vehicles";
 export type CoverPoint = { position: THREE.Vector2; zone: number; taken: boolean };
 
 type Flyer = { group: THREE.Group; blinkers: THREE.Mesh[]; gun: THREE.Object3D; radius: number; height: number; speed: number; phase: number; center: THREE.Vector2; bank: number };
+
+/** Sliding blast door between facility sectors: blocks movement and fire until opened. */
+export type Door = {
+  /** The sector this door leads out of. */
+  from: number;
+  position: THREE.Vector3;
+  panels: Array<{ mesh: THREE.Mesh; closedX: number; slide: number }>;
+  lamp: THREE.MeshStandardMaterial;
+  blocker: Blocker;
+  open: number;
+  opening: boolean;
+};
+
+type Gap = { at: number; half: number; height: number };
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -64,6 +78,8 @@ export class World {
   readonly crashSmokeOrigin = new THREE.Vector3();
   /** Spots around the city where the wider battle flares up (for ambient fire and explosions). */
   readonly ambientPoints: THREE.Vector3[] = [];
+  /** Blast doors between the facility sectors. */
+  readonly doors: Door[] = [];
   /** Doorway-to-deck route used to make reinforcements visibly walk out of the lander. */
   readonly landerDeployment = {
     start: new THREE.Vector3(LANDER.x, 1.9, LANDER.z + 8),
@@ -87,15 +103,18 @@ export class World {
     const b = this.batcher;
     ZONES.forEach((zone, index) => {
       b.chunk = zone.id;
-      const labels: Record<Zone["id"], string> = { A: "AUREK 01", B: "BESH 02", C: "CRESH 03", D: "DORN 04", E: "TIPOCA 05" };
-      this.platform(zone.center.x, zone.center.y, zone.radius, 0, this.gapsFor(index), labels[zone.id], index + 3, true);
+      const labels: Record<Zone["id"], string> = { A: "AUREK 01", B: "BESH 02", C: "CRESH 03", D: "DORN 04", E: "TIPOCA 05", F: "", G: "" };
+      if (zone.id === "E") this.lobby(zone);
+      // Rooms first, so cover standing on the control deck is placed on top of it.
+      if (zone.id === "F") this.securityCorridor(zone, index);
+      if (zone.id === "G") this.cloningHall(zone);
+      if (!zone.room) this.platform(zone.center.x, zone.center.y, zone.radius, 0, this.gapsFor(index), labels[zone.id], index + 3, true);
       for (const cover of zone.cover) this.cover(zone, index, cover.kind, cover.x, cover.z, cover.rotation ?? 0);
-      this.floodlight(zone, index);
+      if (!zone.room) this.floodlight(zone, index);
       this.captureMarker(zone);
     });
-    b.chunk = "E";
-    this.cloningFacility(ZONES[4]);
     BRIDGES.forEach((bridge, index) => {
+      if (bridge.door) return;
       b.chunk = `bridge${index}`;
       this.bridge(bridge);
     });
@@ -125,7 +144,18 @@ export class World {
   private gapsFor(zoneIndex: number): Array<[number, number]> {
     const zone = ZONES[zoneIndex];
     const gaps: Array<[number, number]> = [];
+    // Facility buildings that run off the edge of this platform.
+    for (const other of ZONES) {
+      if (!other.room) continue;
+      const nearX = THREE.MathUtils.clamp(zone.center.x, other.center.x - other.room.hw, other.center.x + other.room.hw);
+      const nearZ = THREE.MathUtils.clamp(zone.center.y, other.center.y - other.room.hd, other.center.y + other.room.hd);
+      if (Math.hypot(nearX - zone.center.x, nearZ - zone.center.y) >= zone.radius) continue;
+      const angle = Math.atan2(other.center.y - zone.center.y, other.center.x - zone.center.x);
+      const half = Math.asin(Math.min(1, (other.room.hw + .45) / zone.radius));
+      gaps.push([angle - half, angle + half]);
+    }
     for (const bridge of BRIDGES) {
+      if (bridge.door) continue;
       if (bridge.from !== zoneIndex && bridge.to !== zoneIndex) continue;
       const inside = bridge.from === zoneIndex ? bridge.a : bridge.b;
       const outside = bridge.from === zoneIndex ? bridge.b : bridge.a;
@@ -277,8 +307,131 @@ export class World {
     }
   }
 
-  /** Final objective: a roofed cloning annex entered from the landing district. */
-  private cloningFacility(zone: Zone): void {
+  // ---------------------------------------------------------------- facility
+
+  private box(material: THREE.Material, x: number, y: number, z: number, sx: number, sy: number, sz: number, options?: BatchOptions): void {
+    this.batcher.place(new THREE.BoxGeometry(sx, sy, sz), material, { x, y, z }, undefined, undefined, options);
+  }
+
+  /**
+   * Straight wall from `from` to `to` along `axis` (an "x" wall runs along x at z = `fixed`), with doorways
+   * cut out of its lower part. Only the full-height pieces block movement.
+   */
+  private wallRun(axis: "x" | "z", fixed: number, from: number, to: number, height: number, thickness: number, material: THREE.Material,
+    gaps: Gap[] = [], solid = true, options: BatchOptions = { uvScale: 1 / 5 }): void {
+    const piece = (a0: number, a1: number, y0: number, y1: number, block: boolean) => {
+      if (a1 - a0 < .01 || y1 - y0 < .01) return;
+      const mid = (a0 + a1) / 2, length = a1 - a0, h = y1 - y0;
+      if (axis === "x") this.box(material, mid, y0 + h / 2, fixed, length, h, thickness, options);
+      else this.box(material, fixed, y0 + h / 2, mid, thickness, h, length, options);
+      if (block && solid) {
+        if (axis === "x") this.nav.addBox(mid, fixed, length, thickness, 0, y1);
+        else this.nav.addBox(fixed, mid, thickness, length, 0, y1);
+      }
+    };
+    let cursor = Math.min(from, to);
+    for (const gap of [...gaps].sort((p, q) => p.at - q.at)) {
+      piece(cursor, gap.at - gap.half, 0, height, true);
+      piece(gap.at - gap.half, gap.at + gap.half, gap.height, height, false);
+      cursor = gap.at + gap.half;
+    }
+    piece(cursor, Math.max(from, to), 0, height, true);
+  }
+
+  /** Half-cylinder roof shell along z, the rounded Kaminoan top seen from outside. */
+  private vaultRoof(x: number, y: number, z: number, radius: number, length: number, rise: number): void {
+    const vault = new THREE.CylinderGeometry(radius, radius, length, 40, 1, false, Math.PI / 2, Math.PI).rotateX(Math.PI / 2);
+    this.batcher.place(vault, this.m.hull, { x, y, z }, undefined, { x: 1, y: rise / radius, z: 1 }, { uvScale: 1 / 8 });
+  }
+
+  /** Stilts from a building's underside to the sea. */
+  private stilts(points: Array<[number, number]>, radius: number, top: number): void {
+    const height = top - OCEAN_LEVEL;
+    for (const [x, z] of points) {
+      this.box(this.m.hullDark, x, top - .4, z, radius * 2.6, .8, radius * 2.6, { cast: false });
+      this.batcher.place(new THREE.CylinderGeometry(radius, radius * 1.3, height, 16), this.m.hullDark, { x, y: OCEAN_LEVEL + height / 2, z }, undefined, undefined, { cast: false, shoot: false });
+    }
+  }
+
+  /**
+   * Dark service closet behind a doorway in a room's outer wall; reinforcements appear inside it.
+   * (`x`, `z`) is the doorway on the room's boundary, (`outX`, `outZ`) points away from the room.
+   */
+  private serviceCloset(x: number, z: number, outX: number, outZ: number): void {
+    const m = this.m;
+    const depth = 2.6, width = 2.1, height = 2.7;
+    const alongX = outX !== 0;
+    const cx = x + outX * depth / 2, cz = z + outZ * depth / 2;
+    const sx = alongX ? depth : width + .4, sz = alongX ? width + .4 : depth;
+    this.box(m.hullDark, cx, -.12, cz, sx, .24, sz, { cast: false });
+    this.box(m.hullDark, cx, height + .12, cz, sx, .24, sz);
+    this.box(m.hullDark, x + outX * (depth + .1), height / 2, z + outZ * (depth + .1), alongX ? .2 : width + .4, height, alongX ? width + .4 : .2);
+    for (const s of [-1, 1]) {
+      this.box(m.hullDark, alongX ? cx : x + s * (width / 2 + .1), height / 2, alongX ? z + s * (width / 2 + .1) : cz, alongX ? depth : .2, height, alongX ? .2 : depth);
+    }
+    this.box(m.redLight, x + outX * (depth - .02), height - .35, z + outZ * (depth - .02), alongX ? .04 : 1.3, .06, alongX ? 1.3 : .04, { cast: false, shoot: false });
+    // Door frame on the room side.
+    for (const s of [-1, 1]) {
+      this.box(m.trim, alongX ? x : x + s * 1.02, 1.3, alongX ? z + s * 1.02 : z, alongX ? .35 : .18, 2.6, alongX ? .18 : .35, { shoot: false });
+    }
+    this.box(m.amberLight, x, 2.62, z, alongX ? .36 : 2, .08, alongX ? 2 : .36, { cast: false, shoot: false });
+  }
+
+  /** A two-leaf blast door across a doorway in an x-running wall. Panels slide sideways into the wall. */
+  private blastDoor(from: number, x: number, z: number, width: number, height: number, thickness: number): Door {
+    const panels: Door["panels"] = [];
+    for (const s of [-1, 1]) {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(width / 2, height, thickness * .5), this.m.hullDark);
+      mesh.position.set(x + s * width / 4, height / 2, z);
+      mesh.castShadow = mesh.receiveShadow = true;
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(width / 2 - .3, .22, thickness * .5 + .02), this.m.hazard);
+      stripe.position.y = -height * .18;
+      const seam = new THREE.Mesh(new THREE.BoxGeometry(.05, height - .3, thickness * .5 + .02), this.m.coolLight);
+      seam.position.x = -s * (width / 4 - .06);
+      mesh.add(stripe, seam);
+      this.scene.add(mesh);
+      this.batcher.shootables.push(mesh);
+      panels.push({ mesh, closedX: mesh.position.x, slide: s * width / 2 });
+    }
+    const lamp = this.m.redLight.clone();
+    this.batcher.place(new THREE.BoxGeometry(width * .6, .12, thickness + .08), lamp, { x, y: height + .25, z }, undefined, undefined, { cast: false, shoot: false });
+    for (const s of [-1, 1]) this.box(this.m.trim, x + s * (width / 2 + .12), height / 2, z, .24, height, thickness + .12, { shoot: false });
+    const blocker = this.nav.addBox(x, z, width, thickness + .2, 0, height);
+    const door: Door = { from, position: new THREE.Vector3(x, height / 2, z), panels, lamp, blocker, open: 0, opening: false };
+    this.doors.push(door);
+    return door;
+  }
+
+  /** Start sliding open the door out of sector `from`; it stops blocking movement at once. `instant` skips the animation. */
+  openDoor(from: number, instant = false): Door | null {
+    const door = this.doors.find((candidate) => candidate.from === from);
+    if (!door || door.opening) return null;
+    door.opening = true;
+    door.blocker.top = -1;
+    door.lamp.emissive.set(0x4fdcff);
+    door.lamp.emissiveIntensity = 3;
+    if (instant) door.open = .999;
+    return door;
+  }
+
+  private updateDoors(delta: number): void {
+    for (const door of this.doors) {
+      if (!door.opening || door.open >= 1) continue;
+      door.open = Math.min(1, door.open + delta / 2.2);
+      const t = door.open * door.open * (3 - 2 * door.open);
+      for (const panel of door.panels) panel.mesh.position.x = panel.closedX + panel.slide * t;
+      if (door.open >= 1) {
+        for (const panel of door.panels) {
+          panel.mesh.visible = false;
+          const index = this.batcher.shootables.indexOf(panel.mesh);
+          if (index >= 0) this.batcher.shootables.splice(index, 1);
+        }
+      }
+    }
+  }
+
+  /** Sector E: the facility's entrance lobby, a roofed hall entered from the landing district. */
+  private lobby(zone: Zone): void {
     const b = this.batcher, m = this.m;
     const x = zone.center.x, z = zone.center.y;
     const wall = (width: number, height: number, depth: number, px: number, py: number, pz: number, solid = true) => {
@@ -286,10 +439,14 @@ export class World {
       if (solid) this.nav.addBox(px, pz, width, depth, 0, py + height / 2);
     };
     // The northern face is split around a broad breach, making the player cross a clear threshold
-    // from the rain and open firefight into a confined, defended final arena.
+    // from the rain and open firefight into a confined, defended hall.
     wall(16, 6.8, .9, x - 12, 3.4, z + 19);
     wall(16, 6.8, .9, x + 12, 3.4, z + 19);
-    wall(40, 6.8, .9, x, 3.4, z - 19);
+    // The back wall holds the blast door into the security corridor.
+    wall(18, 6.8, .9, x - 11, 3.4, z - 19);
+    wall(18, 6.8, .9, x + 11, 3.4, z - 19);
+    wall(4, 3.2, .9, x, 5.2, z - 19, false);
+    this.blastDoor(ZONES.indexOf(zone), x, z - 19, 4, 3.6, .9);
     wall(.9, 6.8, 38, x - 20, 3.4, z);
     wall(.9, 6.8, 38, x + 20, 3.4, z);
     // Door frame and a low, ribbed ceiling make the enclosure read as an interior while preserving
@@ -297,7 +454,9 @@ export class World {
     wall(.9, 7.5, 1.5, x - 4.1, 3.75, z + 19, false);
     wall(.9, 7.5, 1.5, x + 4.1, 3.75, z + 19, false);
     wall(8.8, .8, 1.5, x, 7.1, z + 19, false);
-    b.place(new THREE.BoxGeometry(39, .3, 37), m.hullDark, { x, y: 7.45, z }, undefined, undefined, { uvScale: 1 / 6, cast: false });
+    // The roof casts so moonlight stays outside.
+    b.place(new THREE.BoxGeometry(39, .3, 37), m.hullDark, { x, y: 7.45, z }, undefined, undefined, { uvScale: 1 / 6 });
+    this.nav.addRoof(x - 20, z - 19, x + 20, z + 19, 7.3);
     for (let dz = -14; dz <= 14; dz += 7) {
       b.place(new THREE.BoxGeometry(39, .32, .4), m.trim, { x, y: 7.2, z: z + dz }, undefined, undefined, { cast: false });
       b.place(new THREE.BoxGeometry(38, .05, .08), m.coolLight, { x, y: 7.02, z: z + dz }, undefined, undefined, { cast: false, shoot: false });
@@ -314,6 +473,171 @@ export class World {
     const innerLight = new THREE.PointLight(0xffc487, 20, 17, 2);
     innerLight.position.set(x, 5, z - 11);
     this.scene.add(innerLight);
+    this.lampLights.push(innerLight);
+  }
+
+  /** Sector F: a narrow corridor behind the lobby, three pairs of alcoves between solid wall blocks. */
+  private securityCorridor(zone: Zone, zoneIndex: number): void {
+    const m = this.m;
+    const room = zone.room!;
+    const cx = zone.center.x, cz = zone.center.y, H = room.ceiling;
+    const x0 = cx - room.hw, x1 = cx + room.hw, z0 = cz + room.hd, z1 = cz - room.hd;
+    const walk = 3;
+    const alcoves = [cz + 11, cz, cz - 11];
+    const alcoveHalf = 2.5;
+    const doorsAt = new Set(zone.spawns!.map((spawn) => `${Math.sign(spawn.exit.x - cx)}|${spawn.exit.y}`));
+
+    // Floor: a step above the lobby deck so it never fights the platform paint for depth.
+    this.box(m.interiorFloor, cx, -.11, cz, room.hw * 2, .3, room.hd * 2, { uvScale: 1 / 4 });
+    this.nav.addBox(cx, cz, room.hw * 2, room.hd * 2, 0, .04);
+    this.box(m.hullDark, cx, .045, cz, 1.6, .01, room.hd * 2 - 1, { cast: false, shoot: false, uvScale: 1 / 3 });
+    for (const s of [-1, 1]) this.box(m.coolLight, cx + s * (walk - .15), .05, cz, .06, .02, room.hd * 2 - 1, { cast: false, shoot: false });
+    // Underside where the corridor runs off the lobby platform.
+    this.box(m.hullDark, cx, -.95, cz - 4, room.hw * 2 + .6, 1.6, room.hd * 2 - 8, { cast: false, uvScale: 1 / 5 });
+    this.stilts([[cx, cz - 6], [cx, cz - 17]], .9, -1.75);
+
+    // Outer walls, with service doorways in the far alcoves. Lining inside, weathered shell outside.
+    for (const s of [-1, 1]) {
+      const edge = s < 0 ? x0 : x1;
+      const gaps: Gap[] = alcoves.filter((z) => doorsAt.has(`${s}|${z}`)).map((at) => ({ at, half: .95, height: 2.6 }));
+      this.wallRun("z", edge - s * .3, z1, z0, H, .6, m.interior, gaps);
+      this.wallRun("z", edge + s * .15, z1, z0, H + .3, .3, m.hull, gaps, false);
+      for (const at of gaps.map((gap) => gap.at)) this.serviceCloset(edge, at, s, 0);
+      // Solid blocks between the alcoves; the walkway faces carry light panels and corner trims.
+      const spans: Array<[number, number]> = [];
+      let top = z0;
+      for (const at of alcoves) { spans.push([at + alcoveHalf, top]); top = at - alcoveHalf; }
+      spans.push([z1, top]);
+      for (const [a, c] of spans) {
+        const mid = (a + c) / 2, length = c - a;
+        const bx = cx + s * (walk + (room.hw - walk) / 2);
+        this.box(m.interior, bx, H / 2, mid, room.hw - walk, H, length);
+        this.nav.addBox(bx, mid, room.hw - walk, length, 0, H);
+        for (const end of [a, c]) {
+          if (end === z0 || end === z1) continue;
+          this.box(m.trim, cx + s * walk, H / 2, end, .28, H, .28, { shoot: false });
+        }
+        if (length > 4) this.box(m.coolLight, cx + s * (walk - .01), 2.1, mid, .02, 1.6, .12, { cast: false, shoot: false });
+      }
+      // Alcove fittings and the cover they give: droids hug the wall nearer the lobby, clones the far one.
+      for (const at of alcoves) {
+        const inner = cx + s * 4.6;
+        if (!doorsAt.has(`${s}|${at}`)) {
+          const lx = edge - s * .85;
+          this.box(m.hullDark, lx, 1.1, at, .5, 2.2, 3.6, { uvScale: 1 / 2 });
+          this.box(m.coolLight, lx - s * .26, 1.9, at, .02, .05, 3.2, { cast: false, shoot: false });
+          this.nav.addBox(lx, at, .5, 3.6, 0, 2.2);
+        }
+        this.box(m.warmLight, cx + s * 5, H - .02, at, 1.4, .03, 1.4, { cast: false, shoot: false });
+        this.enemyCover[zoneIndex].push({ position: new THREE.Vector2(inner, at + 1.7), zone: zoneIndex, taken: false });
+        this.allyCover[zoneIndex].push({ position: new THREE.Vector2(inner, at - 1.7), zone: zoneIndex, taken: false });
+      }
+    }
+
+    // Ceiling, panels, and the rounded roof seen from outside.
+    this.box(m.interior, cx, H + .15, cz, room.hw * 2, .3, room.hd * 2, { uvScale: 1 / 5 });
+    for (let z = z0 - 3; z > z1 + 1; z -= 5) this.box(m.coolLight, cx, H - .02, z, 1.4, .04, 2.6, { cast: false, shoot: false });
+    this.vaultRoof(cx, H + .3, cz, room.hw + .3, room.hd * 2, 2.2);
+    this.nav.addRoof(x0 - 2.8, z1, x1 + 2.8, z0, H);
+
+    for (const dz of [9, -9]) {
+      const light = new THREE.PointLight(0xdcefff, 16, 18, 2);
+      light.position.set(cx, H - .6, cz + dz);
+      this.scene.add(light);
+      this.lampLights.push(light);
+    }
+  }
+
+  /** Sector G: the tall cloning hall, rows of growth tanks, a control deck and storm windows at the far end. */
+  private cloningHall(zone: Zone): void {
+    const m = this.m;
+    const room = zone.room!;
+    const cx = zone.center.x, cz = zone.center.y, H = room.ceiling;
+    const x0 = cx - room.hw, x1 = cx + room.hw, z0 = cz + room.hd, z1 = cz - room.hd;
+    const windowHalf = 12, windowBottom = 1.2, windowTop = 10.5;
+    const sideDoor = (side: number) => zone.spawns!.filter((spawn) => Math.abs(spawn.exit.x - (side < 0 ? x0 : x1)) < 3).map((spawn) => spawn.exit.y);
+    const backDoors = zone.spawns!.filter((spawn) => Math.abs(spawn.exit.y - z1) < 4).map((spawn) => spawn.exit.x);
+
+    this.box(m.interiorFloor, cx, -.11, cz, room.hw * 2, .3, room.hd * 2, { uvScale: 1 / 4 });
+    this.nav.addBox(cx, cz, room.hw * 2, room.hd * 2, 0, .04);
+    this.box(m.hullDark, cx, .045, cz + 2, 6, .01, room.hd * 2 - 12, { cast: false, shoot: false, uvScale: 1 / 3 });
+    for (const s of [-1, 1]) this.box(m.coolLight, cx + s * 3, .05, cz + 2, .07, .02, room.hd * 2 - 12, { cast: false, shoot: false });
+    this.box(m.hullDark, cx, -1.3, cz, room.hw * 2 + .6, 2.4, room.hd * 2 + .6, { cast: false, uvScale: 1 / 6 });
+    this.stilts([[cx - 12, cz + 14], [cx + 12, cz + 14], [cx - 12, cz - 14], [cx + 12, cz - 14]], 1.3, -2.5);
+
+    // Front wall with the second blast door, lined to match the corridor.
+    this.wallRun("x", z0 - .4, x0, x1, H, .8, m.interior, [{ at: cx, half: 3, height: 4.2 }]);
+    this.blastDoor(ZONES.indexOf(zone) - 1, cx, z0 - .4, 6, 4.2, .8);
+
+    // Side walls: solid to 7 m with a service door, a band of storm windows above, then the cornice.
+    for (const s of [-1, 1]) {
+      const edge = s < 0 ? x0 : x1;
+      const gaps: Gap[] = sideDoor(s).map((at) => ({ at, half: .95, height: 2.6 }));
+      this.wallRun("z", edge - s * .4, z1, z0, 7, .8, m.interior, gaps);
+      this.wallRun("z", edge + s * .15, z1, z0, 7, .3, m.hull, gaps, false);
+      for (const at of gaps.map((gap) => gap.at)) this.serviceCloset(edge, at, s, 0);
+      const piers: number[] = [];
+      for (let z = z0 - .8; z > z1 + 4; z -= 7) piers.push(z);
+      piers.push(z1 + .8);
+      piers.forEach((z, i) => {
+        this.box(m.interior, edge - s * .4, 9, z, .8, 4, 1.6, { uvScale: 1 / 4 });
+        const next = piers[i + 1];
+        if (next !== undefined) this.box(m.glass, edge - s * .4, 9, (z + next) / 2, .08, 4, z - next - 1.6, { cast: false, shoot: false });
+      });
+      this.box(m.interior, edge - s * .4, 12, cz, .8, 2, room.hd * 2, { uvScale: 1 / 5 });
+      this.box(m.hull, edge + s * .15, 12.15, cz, .3, 2.3, room.hd * 2, { uvScale: 1 / 5 });
+      // Maintenance gantry along the wall (not walkable).
+      const gx = edge - s * 2;
+      this.box(m.hullDark, gx, 5.6, cz - 1, 2.4, .22, room.hd * 2 - 6, { uvScale: 1 / 3 });
+      this.box(m.trim, gx - s * 1.15, 6.15, cz - 1, .07, .07, room.hd * 2 - 6, { shoot: false });
+      this.box(m.warmLight, gx - s * 1.2, 5.48, cz - 1, .04, .04, room.hd * 2 - 6, { cast: false, shoot: false });
+      for (let z = z0 - 4; z > z1 + 3; z -= 7) {
+        this.box(m.trim, gx - s * 1.15, 5.9, z, .06, .55, .06, { shoot: false });
+        this.box(m.hullDark, edge - s * 1.05, 5.1, z, 1.3, .8, .3, { shoot: false });
+      }
+    }
+
+    // Back wall: the great storm window between two service doors.
+    const backZ = z1 + .4;
+    this.wallRun("x", backZ, x0, cx - windowHalf, H, .8, m.interior, backDoors.filter((x) => x < cx).map((at) => ({ at, half: .95, height: 2.6 })));
+    this.wallRun("x", backZ, cx + windowHalf, x1, H, .8, m.interior, backDoors.filter((x) => x > cx).map((at) => ({ at, half: .95, height: 2.6 })));
+    this.wallRun("x", z1 - .15, x0, x1, H + .3, .3, m.hull, [
+      ...backDoors.map((at) => ({ at, half: .95, height: 2.6 })),
+      { at: cx, half: windowHalf, height: windowTop },
+    ], false);
+    for (const x of backDoors) this.serviceCloset(x, z1, 0, -1);
+    this.box(m.interior, cx, windowBottom / 2, backZ, windowHalf * 2, windowBottom, .8);
+    this.box(m.interior, cx, (windowTop + H) / 2, backZ, windowHalf * 2, H - windowTop, .8, { uvScale: 1 / 5 });
+    this.nav.addBox(cx, backZ, windowHalf * 2, .8, 0, H);
+    this.box(m.glass, cx, (windowBottom + windowTop) / 2, backZ, windowHalf * 2, windowTop - windowBottom, .06, { cast: false });
+    for (let i = 0; i <= 6; i++) this.box(m.trim, cx - windowHalf + i * 4, (windowBottom + windowTop) / 2, backZ, .3, windowTop - windowBottom, .9);
+    this.box(m.trim, cx, 5.85, backZ, windowHalf * 2, .25, .9);
+    this.box(m.coolLight, cx, windowBottom + .02, backZ + .46, windowHalf * 2, .03, .05, { cast: false, shoot: false });
+
+    // Raised control deck under the window.
+    const deck = CONTROL_DECK;
+    this.box(m.interiorFloor, deck.x, deck.height / 2, deck.z, deck.width, deck.height, deck.depth, { uvScale: 1 / 4 });
+    this.box(m.coolLight, deck.x, deck.height - .02, deck.z + deck.depth / 2 + .01, deck.width, .04, .04, { cast: false, shoot: false });
+    this.nav.addBox(deck.x, deck.z, deck.width, deck.depth, 0, deck.height);
+
+    // Ceiling with ribs and light strips; the vaulted roof over it.
+    this.box(m.interior, cx, H + .2, cz, room.hw * 2, .4, room.hd * 2, { uvScale: 1 / 6 });
+    for (let z = z0 - 3.5; z > z1; z -= 7) this.box(m.trim, cx, H - .25, z, room.hw * 2, .5, .5, { uvScale: 1 / 2 });
+    for (const dx of [-9, 0, 9]) this.box(dx === 0 ? m.warmLight : m.coolLight, cx + dx, H - .04, cz, dx === 0 ? .3 : .5, .06, room.hd * 2 - 4, { cast: false, shoot: false });
+    this.vaultRoof(cx, H + .4, cz, room.hw + .3, room.hd * 2 + .6, 6.5);
+    this.nav.addRoof(x0 - 2.8, z1 - 2.8, x1 + 2.8, z0, H);
+
+    const lights: Array<[number, number, number, number, number]> = [
+      [0xffd6a8, z0 - 5, 9, 40, 26],
+      [0x8fe8ff, cz, 10, 60, 34],
+      [0xc6ecff, z1 + 7, 8, 46, 28],
+    ];
+    for (const [color, z, y, intensity, distance] of lights) {
+      const light = new THREE.PointLight(color, intensity, distance, 2);
+      light.position.set(cx, y, z);
+      this.scene.add(light);
+      this.lampLights.push(light);
+    }
   }
 
   // ---------------------------------------------------------------- props
@@ -321,6 +645,8 @@ export class World {
   private cover(zone: Zone, zoneIndex: number, kind: string, lx: number, lz: number, rotation: number): void {
     const x = zone.center.x + lx, z = zone.center.y + lz;
     const b = this.batcher, m = this.m;
+    // Indoors, cover stands on the raised floor or the control deck.
+    const base = zone.room ? this.nav.heightAt(x, z) ?? 0 : 0;
     const addPoints = (offsets: Array<[number, number]>, depth: number) => {
       const cos = Math.cos(rotation), sin = Math.sin(rotation);
       for (const [ox] of offsets) {
@@ -337,24 +663,52 @@ export class World {
       this.allyCover[zoneIndex].push({ position: new THREE.Vector2(x - 1.3, z + 3), zone: zoneIndex, taken: false }, { position: new THREE.Vector2(x + 1.3, z + 3), zone: zoneIndex, taken: false });
     } else if (kind === "barricade") {
       const object = new THREE.Object3D();
-      object.position.set(x, .58, z);
+      object.position.set(x, base + .58, z);
       object.rotation.y = rotation;
       b.add(new RoundedBoxGeometry(3.3, 1.16, .8, 3, .2), m.hull, object, { uvScale: 1 / 3 });
-      object.position.y = 1.17;
+      object.position.y = base + 1.17;
       b.add(new THREE.BoxGeometry(2.6, .05, .3), m.trim, object);
-      object.position.y = .98;
+      object.position.y = base + .98;
       b.add(new THREE.BoxGeometry(2.7, .06, .82), m.coolLight, object, { cast: false, shoot: false });
-      this.nav.addBox(x, z, 3.5, 1.0, rotation, 1.16);
+      this.nav.addBox(x, z, 3.5, 1.0, rotation, base + 1.16);
       addPoints([[-.9, 0], [.9, 0]], 1.05);
     } else if (kind === "crate") {
       const object = new THREE.Object3D();
-      object.position.set(x, .5, z);
+      object.position.set(x, base + .5, z);
       object.rotation.y = rotation + this.random() * .6;
       b.add(new RoundedBoxGeometry(1.15, 1, 1.15, 2, .08), m.crate, object, { uvScale: 1 / 2 });
-      object.position.y = .78;
+      object.position.y = base + .78;
       b.add(new THREE.BoxGeometry(1.17, .1, 1.17), m.hazard, object);
-      this.nav.addCircle(x, z, .85, 1);
+      this.nav.addCircle(x, z, .85, base + 1);
       addPoints([[0, 0]], 1.05);
+    } else if (kind === "tank") {
+      // Growth tank: lit fluid column with a dark figure inside, plumbed into the ceiling.
+      const top = zone.room?.ceiling ?? 8;
+      b.place(new THREE.CylinderGeometry(1.4, 1.55, .6, 28), m.hullDark, { x, y: base + .3, z }, undefined, undefined, { uvScale: 1 / 2 });
+      b.place(new THREE.TorusGeometry(1.43, .04, 4, 40).rotateX(Math.PI / 2), m.coolLight, { x, y: base + .62, z }, undefined, undefined, { cast: false, shoot: false });
+      b.place(new THREE.CylinderGeometry(1.05, 1.05, 4.1, 28, 1, true), m.tankFluid, { x, y: base + 2.65, z }, undefined, undefined, { cast: false });
+      b.place(new THREE.CylinderGeometry(1.18, 1.18, 4.3, 28, 1, true), m.tankGlass, { x, y: base + 2.75, z }, undefined, undefined, { cast: false, shoot: false });
+      b.place(new THREE.SphereGeometry(.42, 14, 10), m.window, { x, y: base + 2.7, z }, [(this.random() - .5) * .3, 0, (this.random() - .5) * .3], { x: .75, y: 1.7, z: .75 }, { cast: false, shoot: false });
+      b.place(new THREE.CylinderGeometry(1.25, 1.4, .7, 28), m.hullDark, { x, y: base + 5.25, z }, undefined, undefined, { uvScale: 1 / 2 });
+      b.place(new THREE.TorusGeometry(1.2, .035, 4, 40).rotateX(Math.PI / 2), m.warmLight, { x, y: base + 4.88, z }, undefined, undefined, { cast: false, shoot: false });
+      for (const s of [-1, 1]) {
+        const length = top - base - 5.6;
+        b.place(new THREE.CylinderGeometry(.11, .11, length, 8), m.trim, { x: x + s * .55, y: base + 5.6 + length / 2, z }, undefined, undefined, { shoot: false });
+      }
+      this.nav.addCircle(x, z, 1.45, top);
+      for (const s of [-1, 1]) {
+        this.enemyCover[zoneIndex].push({ position: new THREE.Vector2(x + s * .9, z - 2.1), zone: zoneIndex, taken: false });
+        this.allyCover[zoneIndex].push({ position: new THREE.Vector2(x + s * .9, z + 2.1), zone: zoneIndex, taken: false });
+      }
+    } else if (kind === "console") {
+      const object = new THREE.Object3D();
+      object.position.set(x, base + .55, z);
+      object.rotation.y = rotation;
+      b.add(new THREE.BoxGeometry(2.6, 1.1, .9), m.hullDark, object, { uvScale: 1 / 2 });
+      object.position.y = base + 1.13;
+      b.add(new THREE.BoxGeometry(2.3, .03, .62), m.coolLight, object, { cast: false, shoot: false });
+      this.nav.addBox(x, z, 2.8, 1.1, rotation, base + 1.1);
+      addPoints([[-.8, 0], [.8, 0]], 1.05);
     } else if (kind === "dais") {
       const steps = [[DAIS.outerRadius, .35], [(DAIS.outerRadius + DAIS.innerRadius) / 2, .7], [DAIS.innerRadius, DAIS.height]] as const;
       for (const [radius, height] of steps) {
@@ -434,6 +788,13 @@ export class World {
     (beam.material as THREE.ShaderMaterial).uniforms.uStrength.value = .3;
     beam.geometry.rotateX(Math.PI);
     beam.position.y = 4.5;
+    if (zone.room) {
+      // Keep the column under the ceiling.
+      const height = Math.min(9, zone.room.ceiling - .3);
+      beam.scale.y = height / 9;
+      beam.position.y = height / 2;
+      group.position.y = .07;
+    }
     group.add(ring, fill, beam);
     group.visible = false;
     this.scene.add(group);
@@ -682,6 +1043,7 @@ export class World {
 
   update(delta: number, time: number): void {
     this.m.update(time);
+    this.updateDoors(delta);
     for (const flyer of this.flyers) {
       const a = flyer.phase + time * flyer.speed;
       const x = flyer.center.x + Math.cos(a) * flyer.radius;

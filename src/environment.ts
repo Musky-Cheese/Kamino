@@ -1,6 +1,22 @@
 import * as THREE from "three";
 import { OCEAN_LEVEL } from "./config";
+import type { Roof } from "./navigation";
 import { rng, smokeTexture } from "./textures";
+
+const MAX_ROOFS = 4;
+
+/** True under any roof: rain never falls indoors, but stays visible through doorways and windows. */
+const SHELTER_GLSL = /* glsl */ `
+  uniform vec4 uRoofs[${MAX_ROOFS}];
+  uniform float uRoofY[${MAX_ROOFS}];
+  bool sheltered(vec3 p) {
+    for (int i = 0; i < ${MAX_ROOFS}; i++) {
+      vec4 r = uRoofs[i];
+      if (p.x > r.x && p.x < r.z && p.z > r.y && p.z < r.w && p.y < uRoofY[i]) return true;
+    }
+    return false;
+  }
+`;
 
 const NOISE_GLSL = /* glsl */ `
   float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -56,9 +72,17 @@ export class Environment {
   private readonly curtains: THREE.Mesh[] = [];
   private readonly random = rng(1337);
   private nextLightning = 4;
+  private readonly shelterUniforms = {
+    uRoofs: { value: Array.from({ length: MAX_ROOFS }, () => new THREE.Vector4()) },
+    uRoofY: { value: new Array<number>(MAX_ROOFS).fill(0) },
+  };
   onThunder?: (distance: number, strength: number) => void;
 
-  constructor(private readonly scene: THREE.Scene, private readonly heightAt: (x: number, z: number) => number | null) {
+  constructor(private readonly scene: THREE.Scene, private readonly heightAt: (x: number, z: number) => number | null, private readonly roofs: Roof[] = []) {
+    roofs.slice(0, MAX_ROOFS).forEach((roof, i) => {
+      this.shelterUniforms.uRoofs.value[i].set(roof.x0, roof.z0, roof.x1, roof.z1);
+      this.shelterUniforms.uRoofY.value[i] = roof.y;
+    });
     const sky = new THREE.Mesh(new THREE.SphereGeometry(1400, 48, 24), new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
@@ -89,7 +113,7 @@ export class Environment {
     this.ocean = this.buildOcean();
     scene.add(this.ocean);
 
-    this.rainUniforms = { uTime: { value: 0 }, uCamera: { value: new THREE.Vector3() }, uFlash: { value: 0 } };
+    this.rainUniforms = { uTime: { value: 0 }, uCamera: { value: new THREE.Vector3() }, uFlash: { value: 0 }, ...this.shelterUniforms };
     this.rain = this.buildRain();
     scene.add(this.rain);
 
@@ -132,6 +156,10 @@ export class Environment {
   }
 
   get oceanMesh(): THREE.Mesh { return this.ocean; }
+
+  private sheltered(x: number, z: number): boolean {
+    return this.roofs.some((roof) => x >= roof.x0 && x <= roof.x1 && z >= roof.z0 && z <= roof.z1);
+  }
 
   /** Screen-space weather that must not appear in the deck reflection pass. */
   get reflectionHidden(): THREE.Object3D[] { return [this.rain, this.splashes, ...this.curtains]; }
@@ -265,6 +293,7 @@ export class Environment {
         uniform vec3 uCamera;
         varying vec2 vUv;
         varying float vFade;
+        ${SHELTER_GLSL}
         void main() {
           vec3 box = vec3(56., 34., 56.);
           float speed = 22. + aOffset.w * 8.;
@@ -272,6 +301,7 @@ export class Environment {
           vec3 p = aOffset.xyz * box + wind * uTime;
           vec3 rel = mod(p - uCamera, box) - box * .5;
           vec3 world = uCamera + rel;
+          if (sheltered(world)) { gl_Position = vec4(0., 0., -2., 1.); vUv = vec2(0.); vFade = 0.; return; }
           vec3 dir = normalize(wind);
           float len = .7 + aOffset.w * .9;
           vec3 toCam = normalize(cameraPosition - world);
@@ -307,15 +337,24 @@ export class Environment {
         depthWrite: false,
         side: THREE.BackSide,
         blending: THREE.AdditiveBlending,
-        uniforms: { uTime: this.rainUniforms.uTime, uFlash: this.rainUniforms.uFlash, uOpacity: { value: opacity }, uDensity: { value: density } },
+        uniforms: { uTime: this.rainUniforms.uTime, uFlash: this.rainUniforms.uFlash, uOpacity: { value: opacity }, uDensity: { value: density }, ...this.shelterUniforms },
         vertexShader: /* glsl */ `
           varying vec2 vUv;
-          void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+          varying vec3 vWorld;
+          void main() {
+            vUv = uv;
+            vec4 world = modelMatrix * vec4(position, 1.0);
+            vWorld = world.xyz;
+            gl_Position = projectionMatrix * viewMatrix * world;
+          }`,
         fragmentShader: /* glsl */ `
           uniform float uTime, uFlash, uOpacity, uDensity;
           varying vec2 vUv;
+          varying vec3 vWorld;
+          ${SHELTER_GLSL}
           float hash(float n) { return fract(sin(n * 91.3458) * 47453.5453); }
           void main() {
+            if (sheltered(vWorld)) discard;
             vec2 uv = vUv * vec2(uDensity, 5.);
             float column = floor(uv.x);
             float r = hash(column);
@@ -449,7 +488,7 @@ export class Environment {
         const radius = Math.sqrt(this.random()) * 16;
         state.x = camera.position.x + Math.cos(angle) * radius;
         state.z = camera.position.z + Math.sin(angle) * radius;
-        const y = this.heightAt(state.x, state.z);
+        const y = this.sheltered(state.x, state.z) ? null : this.heightAt(state.x, state.z);
         matrix.makeTranslation(state.x, y === null ? -9999 : y + .02, state.z);
         this.splashes.setMatrixAt(i, matrix);
       }

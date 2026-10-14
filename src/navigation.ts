@@ -4,29 +4,51 @@ import { BRIDGES, DAIS, ZONES, type Bridge } from "./config";
 type CircleBlocker = { kind: "circle"; x: number; z: number; r: number; top: number };
 type BoxBlocker = { kind: "box"; x: number; z: number; hw: number; hd: number; cos: number; sin: number; top: number };
 export type Blocker = CircleBlocker | BoxBlocker;
+/** A roofed footprint: no rain below `y`, and the player counts as indoors under it. */
+export type Roof = { x0: number; z0: number; x1: number; z1: number; y: number };
 
 export const STEP_HEIGHT = .45;
 const EDGE_MARGIN = .55;
 const OFFSETS: Array<[number, number]> = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [.7, .7], [-.7, .7], [.7, -.7], [-.7, -.7]];
 
 /**
- * Analytic walkable space: circular platforms, bridge corridors, the Cresh dais and solid props.
+ * Analytic walkable space: circular platforms, facility rooms, bridge corridors, the Cresh dais and solid props.
  * Cheap enough to query many times per actor per frame.
  */
 export class Navigation {
   readonly blockers: Blocker[] = [];
+  readonly roofs: Roof[] = [];
 
   addCircle(x: number, z: number, r: number, top: number): void {
     this.blockers.push({ kind: "circle", x, z, r, top });
   }
 
-  addBox(x: number, z: number, width: number, depth: number, rotation: number, top: number): void {
-    this.blockers.push({ kind: "box", x, z, hw: width / 2, hd: depth / 2, cos: Math.cos(rotation), sin: Math.sin(rotation), top });
+  /** Returns the blocker so doors can switch it off (top below the floor) when they open. */
+  addBox(x: number, z: number, width: number, depth: number, rotation: number, top: number): Blocker {
+    const blocker: Blocker = { kind: "box", x, z, hw: width / 2, hd: depth / 2, cos: Math.cos(rotation), sin: Math.sin(rotation), top };
+    this.blockers.push(blocker);
+    return blocker;
+  }
+
+  addRoof(x0: number, z0: number, x1: number, z1: number, y: number): void {
+    this.roofs.push({ x0: Math.min(x0, x1), z0: Math.min(z0, z1), x1: Math.max(x0, x1), z1: Math.max(z0, z1), y });
+  }
+
+  /** Height of the roof over this spot, or null in the open. */
+  roofAt(x: number, z: number): number | null {
+    for (const roof of this.roofs) {
+      if (x >= roof.x0 && x <= roof.x1 && z >= roof.z0 && z <= roof.z1) return roof.y;
+    }
+    return null;
   }
 
   /** Floor height of open walkable ground (ignoring props), or null over the void. */
   groundAt(x: number, z: number): number | null {
     for (const zone of ZONES) {
+      if (zone.room && Math.abs(x - zone.center.x) <= zone.room.hw && Math.abs(z - zone.center.y) <= zone.room.hd) return 0;
+    }
+    for (const zone of ZONES) {
+      if (zone.room) continue;
       const dx = x - zone.center.x, dz = z - zone.center.y;
       const d = Math.hypot(dx, dz);
       if (d <= zone.radius - EDGE_MARGIN) {
@@ -89,9 +111,14 @@ export class Navigation {
   }
 
   zoneAt(x: number, z: number): number {
+    // Rooms first: the corridor overlaps the back of the lobby's platform.
+    for (let i = 0; i < ZONES.length; i++) {
+      const room = ZONES[i].room;
+      if (room && Math.abs(x - ZONES[i].center.x) <= room.hw && Math.abs(z - ZONES[i].center.y) <= room.hd) return i;
+    }
     for (let i = 0; i < ZONES.length; i++) {
       const zone = ZONES[i];
-      if (Math.hypot(x - zone.center.x, z - zone.center.y) <= zone.radius) return i;
+      if (!zone.room && Math.hypot(x - zone.center.x, z - zone.center.y) <= zone.radius) return i;
     }
     return -1;
   }

@@ -1,21 +1,26 @@
 # Kamino
 
-A non-commercial, fan-made first-person shooter for the browser, set during the Battle of Kamino. You are a clone trooper on the storm-lashed platforms of Tipoca City: fight across the bridges with your squad, take each sector, and push the droid army back to its landing craft.
+A non-commercial, fan-made first-person shooter for the browser, set during the Battle of Kamino. You are a clone trooper on the storm-lashed platforms of Tipoca City: fight across the bridges with your squad, take each sector, push the droid army past its landing craft and clear them out of the cloning facility.
 
 **Play:** https://musky-cheese.github.io/Kamino/
 
 ## The battle
 
-The front line runs across four platforms connected by exposed bridges:
+The front line runs across four platforms connected by exposed bridges, then indoors through the Tipoca cloning facility:
 
-| Sector | Platform | What's there |
+| Sector | Location | What's there |
 | --- | --- | --- |
 | A | Aurek Landing Pad | Your squad and a parked Republic gunship |
 | B | Besh Junction | Dug-in B1 battle droids behind pod towers and barricades |
 | C | Cresh Plaza | A raised central dais, super battle droids |
 | D | Dorn Landing Platform | The Separatist landing craft pouring out reinforcements |
+| E | Tipoca Facility Lobby | A roofed hall with pillars, sealed at the back by a blast door |
+| F | Security Corridor | A narrow 40 m corridor; the alcoves are the only cover, droids come out of service doors |
+| G | Cloning Hall | Rows of growth tanks, a raised control deck and storm windows; the last stand |
 
-Kill enough droids in a sector and the survivors **fall back** to the next platform. Move into the marked zone to **secure** it; the front line advances, your squad moves up, and you get armour, detonators and reinforcements. Clear Dorn platform to win.
+Kill enough droids in a sector and the survivors **fall back** to the next one; inside the facility the next blast door grinds open for them. Move into the marked zone to **secure** it; the front line advances, your squad moves up, and you get armour, detonators and reinforcements. Indoors the squad follows you into each room. Clear the cloning hall to win.
+
+Under a roof the rain stops, your visor dries, lightning only reaches in through windows and doorways, the storm is muffled and blaster fire echoes off the walls.
 
 ## Features
 
@@ -53,7 +58,7 @@ pnpm install
 pnpm dev
 ```
 
-Build the production version with `pnpm build`. Add `?test` to the URL to skip the menu and pointer lock (useful for automated checks).
+Build the production version with `pnpm build`. Add `?test` to the URL to skip the menu and pointer lock (useful for automated checks). `?start=final`, `?start=corridor` and `?start=hall` jump straight to the facility entrance, the security corridor or the cloning hall.
 
 ## Code map
 
@@ -61,8 +66,8 @@ Build the production version with `pnpm build`. Add `?test` to the URL to skip t
 | --- | --- |
 | `src/game.ts` | Game loop, player controller, mission phases, HUD, post-processing |
 | `src/battle.ts` | Droid and clone AI, blaster bolts, damage |
-| `src/world.ts` | Tipoca City construction, cover points, floodlights, flyovers |
-| `src/navigation.ts` | Walkable space, collision and bridge routing |
+| `src/world.ts` | Tipoca City and cloning facility construction, blast doors, cover points, floodlights, flyovers |
+| `src/navigation.ts` | Walkable space, collision, roofs, bridge and doorway routing |
 | `src/config.ts` | Map layout and mission tuning |
 | `src/environment.ts` | Sky, ocean, rain, lightning |
 | `src/reflections.ts` | Wet-deck planar reflections |

@@ -33,6 +33,13 @@ export class GameAudio {
   private master!: GainNode;
   private sfx!: GainNode;
   private reverbSend!: GainNode;
+  /** Rain, wind, sea and thunder: muffled through the walls when the player is indoors. */
+  private outdoor!: GainNode;
+  private outdoorTone!: BiquadFilterNode;
+  /** Hard-walled room reverb, faded in indoors. */
+  private roomSend!: GainNode;
+  private room!: GainNode;
+  private indoor = 0;
   private noise!: AudioBuffer;
   private brown!: AudioBuffer;
   private readonly listener = new THREE.Vector3();
@@ -73,6 +80,26 @@ export class GameAudio {
       delay.connect(tone).connect(fb).connect(delay);
       tone.connect(this.master);
     }
+
+    this.outdoorTone = ctx.createBiquadFilter();
+    this.outdoorTone.type = "lowpass";
+    this.outdoorTone.frequency.value = 18000;
+    this.outdoor = ctx.createGain();
+    this.outdoorTone.connect(this.outdoor).connect(this.master);
+
+    // Indoor room: a short, bright decay built from noise, so shots ring off the walls.
+    const convolver = ctx.createConvolver();
+    const length = Math.floor(ctx.sampleRate * 1.3);
+    const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+    for (let channel = 0; channel < 2; channel++) {
+      const data = impulse.getChannelData(channel);
+      for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** 2.6;
+    }
+    convolver.buffer = impulse;
+    this.roomSend = ctx.createGain();
+    this.room = ctx.createGain();
+    this.room.gain.value = 0;
+    this.roomSend.connect(convolver).connect(this.room).connect(this.master);
 
     this.noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const white = this.noise.getChannelData(0);
@@ -132,6 +159,43 @@ export class GameAudio {
     this.right.set(1, 0, 0).applyQuaternion(quaternion);
   }
 
+  /** 0 outside, 1 under a roof: muffles the storm and brings up the room reverb. */
+  setIndoor(amount: number): void {
+    this.indoor = amount;
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    this.outdoorTone.frequency.setTargetAtTime(THREE.MathUtils.lerp(18000, 650, amount), t, .1);
+    this.outdoor.gain.setTargetAtTime(1 - amount * .55, t, .1);
+    this.room.gain.setTargetAtTime(amount * .5, t, .1);
+  }
+
+  /** Heavy blast door grinding open. */
+  door(position: THREE.Vector3): void {
+    const out = this.spatial(position, 60, .5);
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const rumble = this.noiseSource(this.brown);
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass"; lp.frequency.value = 260;
+    rumble.connect(lp);
+    this.envelope(lp, 1.6, .25, 2.2).connect(out);
+    rumble.start(t); rumble.stop(t + 2.6);
+    const hiss = this.noiseSource(this.noise);
+    const bp = ctx.createBiquadFilter();
+    bp.type = "bandpass"; bp.frequency.value = 2400; bp.Q.value = .8;
+    hiss.connect(bp);
+    this.envelope(bp, .25, .02, .6).connect(out);
+    hiss.start(t); hiss.stop(t + .8);
+    const clunk = ctx.createOscillator();
+    clunk.type = "triangle";
+    clunk.frequency.setValueAtTime(70, t + 2.1);
+    clunk.frequency.exponentialRampToValueAtTime(38, t + 2.4);
+    this.envelope(clunk, .7, .01, .35, 2.1).connect(out);
+    clunk.start(t + 2.1); clunk.stop(t + 2.6);
+  }
+
   /** Output node for a sound at `position` with distance attenuation, panning and air absorption. */
   private spatial(position: THREE.Vector3 | null, reach = 60, wet = .25): AudioNode | null {
     const ctx = this.ctx;
@@ -154,8 +218,13 @@ export class GameAudio {
     gain.gain.value = attenuation;
     gain.connect(air).connect(pan).connect(this.sfx);
     const send = ctx.createGain();
-    send.gain.value = wet * (.4 + Math.min(1, distance / 40));
+    send.gain.value = wet * (.4 + Math.min(1, distance / 40)) * (1 - this.indoor * .6);
     pan.connect(send).connect(this.reverbSend);
+    if (this.indoor > .05) {
+      const roomSend = ctx.createGain();
+      roomSend.gain.value = (wet + .15) * this.indoor;
+      pan.connect(roomSend).connect(this.roomSend);
+    }
     return gain;
   }
 
@@ -337,7 +406,7 @@ export class GameAudio {
     gain.gain.linearRampToValueAtTime(peak, t + .08);
     for (let k = 1; k < 9; k++) gain.gain.linearRampToValueAtTime(peak * (.3 + Math.random() * .7) * (1 - k / 10), t + k * .45);
     gain.gain.exponentialRampToValueAtTime(.0001, t + 5.5);
-    source.connect(lp).connect(gain).connect(this.master);
+    source.connect(lp).connect(gain).connect(this.outdoorTone);
     source.start(t, Math.random()); source.stop(t + 6);
   }
 
@@ -570,7 +639,7 @@ export class GameAudio {
     const gustDepth = ctx.createGain();
     gustDepth.gain.value = .035;
     gust.connect(gustDepth).connect(rainGain.gain);
-    rain.connect(rainTone).connect(rainGain).connect(this.master);
+    rain.connect(rainTone).connect(rainGain).connect(this.outdoorTone);
     rain.start(); gust.start();
 
     const sea = this.noiseSource(this.brown, true);
@@ -583,7 +652,7 @@ export class GameAudio {
     const lfoDepth = ctx.createGain();
     lfoDepth.gain.value = .09;
     lfo.connect(lfoDepth).connect(seaGain.gain);
-    sea.connect(seaLp).connect(seaGain).connect(this.master);
+    sea.connect(seaLp).connect(seaGain).connect(this.outdoorTone);
     sea.start(); lfo.start();
 
     const wind = this.noiseSource(this.noise, true);
@@ -596,7 +665,7 @@ export class GameAudio {
     windLfo.connect(windDepth).connect(windBand.frequency);
     const windGain = ctx.createGain();
     windGain.gain.value = .045;
-    wind.connect(windBand).connect(windGain).connect(this.master);
+    wind.connect(windBand).connect(windGain).connect(this.outdoorTone);
     wind.start(); windLfo.start();
   }
 

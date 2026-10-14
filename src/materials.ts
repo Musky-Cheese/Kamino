@@ -35,6 +35,14 @@ export class Materials {
   readonly canopy: THREE.MeshStandardMaterial;
   readonly fireGlow: THREE.MeshStandardMaterial;
   readonly crate: THREE.MeshStandardMaterial;
+  /** Clean white Kaminoan interior walls: the hull plating without rain streaks. */
+  readonly interior: THREE.MeshStandardMaterial;
+  /** Dry, polished interior floor (off the reflection plane, no puddles). */
+  readonly interiorFloor: THREE.MeshStandardMaterial;
+  /** Storm windows of the cloning hall. */
+  readonly glass: THREE.MeshStandardMaterial;
+  readonly tankGlass: THREE.MeshStandardMaterial;
+  readonly tankFluid: THREE.MeshStandardMaterial;
   private readonly padPaints = new Map<string, THREE.MeshStandardMaterial>();
 
   /**
@@ -81,6 +89,8 @@ export class Materials {
       this.hull = fromSet(surfaces.hull, 2, { color: 0xf2f6f8, ao: true, metalness: .3, roughness: .8, normalScale: new THREE.Vector2(.8, .8) });
       this.hullDark = fromSet(surfaces.hullDark, 2.5, { color: 0x7d8a92, metal: true, metalness: .7, roughness: .9 });
       this.trim = fromSet(surfaces.trim, 1, { color: 0xc2cdd3, metal: true, metalness: 1, roughness: .6 });
+      // Cloned before weathering so the interior stays clean.
+      this.interior = this.hull.clone();
       addWeathering(this.hull);
       addWeathering(this.hullDark, .8);
     } else {
@@ -89,7 +99,13 @@ export class Materials {
       this.hull = standard(hullSet, { metalness: .45, roughness: 1, normalScale: new THREE.Vector2(.7, .7) });
       this.hullDark = standard(hullDarkSet, { metalness: .6, roughness: 1, normalScale: new THREE.Vector2(.7, .7) });
       this.trim = new THREE.MeshStandardMaterial({ color: 0x8ea3ad, metalness: .9, roughness: .22 });
+      this.interior = this.hull.clone();
     }
+    this.interior.color.set(0xf6f9fa);
+    this.interior.roughness = .55;
+    this.interiorFloor = this.deck.clone();
+    this.interiorFloor.color.set(0xc4ced3);
+    this.interiorFloor.roughness = .6;
     this.deckRaised = this.deck.clone();
     addPuddles(this.deckRaised, .35);
     this.window = new THREE.MeshStandardMaterial({ color: 0x050b10, metalness: .9, roughness: .06, emissive: 0x0a2230, emissiveIntensity: .6 });
@@ -114,6 +130,9 @@ export class Materials {
     this.canopy = new THREE.MeshStandardMaterial({ color: 0x0b1a16, metalness: .9, roughness: .05, emissive: 0x0b2a1c, emissiveIntensity: .5 });
     this.fireGlow = glow(0xff6a1c, 7);
     this.crate = new THREE.MeshStandardMaterial({ color: 0x4f5a60, metalness: .55, roughness: .45 });
+    this.glass = new THREE.MeshStandardMaterial({ color: 0x0a1820, metalness: .9, roughness: .05, transparent: true, opacity: .32, depthWrite: false });
+    this.tankGlass = new THREE.MeshStandardMaterial({ color: 0x9fd8e6, metalness: .2, roughness: .08, transparent: true, opacity: .12, depthWrite: false });
+    this.tankFluid = new THREE.MeshStandardMaterial({ color: 0x0b2a30, emissive: 0x2fb4c8, emissiveIntensity: .45, roughness: .3, metalness: 0, transparent: true, opacity: .42, depthWrite: false });
   }
 
   /** Puddles on the y = 0 decks. Call after the planar reflection patch, which replaces onBeforeCompile. */
