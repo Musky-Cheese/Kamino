@@ -7,7 +7,7 @@ import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import type { ActorKind } from "./actors";
 import { GameAudio } from "./audio";
 import { Actor, Battle, type Target } from "./battle";
-import { BRIDGES, LANDER, PHASES, PLAYER_START, ZONES, type PhaseSpec, type Quality } from "./config";
+import { BRIDGES, PHASES, PLAYER_START, ZONES, type PhaseSpec, type Quality } from "./config";
 import { BOLT_COLORS, Effects } from "./effects";
 import { Environment } from "./environment";
 import { Materials } from "./materials";
@@ -115,12 +115,12 @@ const GRADE_SHADER = {
       uv += (vUv - .5) * .07 * sr * sr * uScope;
       vec2 c = uv - .5;
       float r2 = dot(c, c);
-      float ca = (.0012 + uDamage * .006) * (1. + r2 * 4.) + pow(min(sr, 1.2), 4.) * .018 * uScope;
+      float ca = (.00045 + uDamage * .003) * (1. + r2 * 3.) + pow(min(sr, 1.2), 4.) * .009 * uScope;
       vec3 col;
       col.r = texture2D(tDiffuse, uv + c * ca).r;
       col.g = texture2D(tDiffuse, uv).g;
       col.b = texture2D(tDiffuse, uv - c * ca).b;
-      col += rain.z * .05;
+      col += rain.z * .025;
       float luma = dot(col, vec3(.299, .587, .114));
       // Cool shadows, slightly warm highlights.
       col += vec3(-.006, .004, .014) * (1. - luma);
@@ -162,7 +162,7 @@ const GRADE_SHADER = {
         col += vec3(.5, .06, .02) * smoothstep(.04, 0., length(q)) * .25 * smoothstep(.6, 1., uScope);
       }
       col += uFlash * vec3(.05, .07, .09);
-      col += (hash(vUv * 931.) - .5) * .028;
+      col += (hash(vUv * 931.) - .5) * .012;
       gl_FragColor = vec4(col, 1.);
     }`,
 };
@@ -245,7 +245,9 @@ export class KaminoGame {
   private shotsHit = 0;
   private alliesLost = 0;
   private quality: Quality;
-  private testMode = new URLSearchParams(location.search).has("test");
+  private readonly launchParams = new URLSearchParams(location.search);
+  private testMode = this.launchParams.has("test");
+  private readonly startAtFinal = this.launchParams.get("start") === "final";
   private radioQueue: Array<{ from: string; text: string }> = [];
   private radioTimer = 0;
   private bannerTimer = 0;
@@ -383,7 +385,7 @@ export class KaminoGame {
           gl_FragColor = vec4(clamp(c.rgb, vec3(0.), vec3(40.)), c.a);
         }`,
     }));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .38, .45, 1);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .24, .35, 1.2);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
     this.grade = new ShaderPass(GRADE_SHADER);
@@ -416,6 +418,17 @@ export class KaminoGame {
   }
 
   private setupMission(): void {
+    if (this.startAtFinal) {
+      // Put the squad at the Dorn/Tipoca approach, with the first three sectors already secured.
+      this.feet.set(2, this.world.nav.heightAt(2, -120) ?? 0, -120);
+      const allyStarts = [[-1, -119], [5, -120], [-3, -123], [7, -124]];
+      allyStarts.forEach(([x, z]) => this.battle.spawnClone(new THREE.Vector2(x, z), 4));
+      this.front = 3;
+      this.startPhase(PHASES.length - 1);
+      this.$("#menu .mission-copy").textContent = "Dorn is secure, but the surviving droids have sealed themselves inside the Tipoca cloning facility. Join the squad at the final approach and finish the assault.";
+      this.$("#start").textContent = "Deploy to final sector";
+      return;
+    }
     // Squad on Aurek pad.
     const allyStarts = [[-2, 67], [2.5, 67.5], [-3.5, 71], [8.5, 68.5]];
     allyStarts.forEach(([x, z]) => this.battle.spawnClone(new THREE.Vector2(x, z), 0));
@@ -452,8 +465,9 @@ export class KaminoGame {
     const zone = this.phase.spec.enemyZone;
     let from: THREE.Vector2, fromZone: number;
     if (zone >= 2) {
-      from = LANDER.ramp.clone().add(new THREE.Vector2((Math.random() - .5) * 2, Math.random() * 2));
-      fromZone = 3;
+      this.battle.deployFromLander(this.nextKind(), zone);
+      this.phase.spawned++;
+      return;
     } else {
       const bridge = BRIDGES.filter((b) => b.from === zone)[Math.floor(Math.random() * 2)];
       const center = ZONES[zone + 1].center;
@@ -573,10 +587,15 @@ export class KaminoGame {
     if (!this.started) {
       this.started = true;
       this.placePlayerCamera();
-      this.radio("Command · Tipoca", "All units: droids have overrun Besh Junction. Push across the bridges and drive them back!");
-      this.radio("Sergeant", "On me, trooper. Watch those bridges—there's no cover out there.");
+      if (this.startAtFinal) {
+        this.radio("Command · Tipoca", "Dorn is secure. The remaining droids are entrenched inside the cloning facility.");
+        this.radio("Sergeant", "Final push, trooper. Cross the approach and finish this.");
+      } else {
+        this.radio("Command · Tipoca", "All units: droids have overrun Besh Junction. Push across the bridges and drive them back!");
+        this.radio("Sergeant", "On me, trooper. Watch those bridges—there's no cover out there.");
+      }
       this.radio("Sergeant", "Aim with right click, and crouch behind the barricades with C. Your armor recovers if you stay out of fire.");
-      this.banner("The Battle of Kamino", "Push them back");
+      this.banner(this.startAtFinal ? "Final assault" : "The Battle of Kamino", this.startAtFinal ? "Take Tipoca" : "Push them back");
     }
     if (this.testMode) {
       this.$("#menu").classList.add("hidden");
@@ -599,7 +618,8 @@ export class KaminoGame {
   /** Put the camera back behind the trooper's eyes when the mission begins. */
   private placePlayerCamera(): void {
     this.camera.position.copy(this.feet).setY(this.feet.y + EYE_HEIGHT);
-    this.camera.lookAt(0, 1.5, 30);
+    const objective = ZONES[this.phase.spec.enemyZone].center;
+    this.camera.lookAt(objective.x, 1.5, objective.y);
     this.viewmodel.root.visible = true;
   }
 
@@ -693,7 +713,7 @@ export class KaminoGame {
     this.reflections.render(this.renderer, this.scene, this.camera, hidden);
     this.updateVolumeLights();
     this.compositePass.ads = this.ads * (1 - this.scope);
-    (this.grade.uniforms.uRain as THREE.IUniform).value = this.started ? .28 + Math.max(0, this.camera.rotation.x) * .45 : .2;
+    (this.grade.uniforms.uRain as THREE.IUniform).value = this.started ? .28 + Math.max(0, this.camera.rotation.x) * .25 : .2;
     this.composer.render(this.renderDelta);
     this.camera.quaternion.copy(saved);
   }
@@ -1085,7 +1105,7 @@ export class KaminoGame {
     const present = this.battle.aliveCount("separatist", next.enemyZone);
     for (let i = present; i < next.initial; i++) {
       const kind: ActorKind = i === next.initial - 1 && next.superDroids > 0 ? "b2" : "b1";
-      this.battle.deployDefender(kind, next.enemyZone);
+      this.battle.deployFromLander(kind, next.enemyZone, i - present);
     }
   }
 
@@ -1103,7 +1123,8 @@ export class KaminoGame {
     this.updateHud();
     const lines = [
       ["Command · Tipoca", "Besh Junction is ours. Keep pushing—Cresh Plaza is next. Expect super battle droids."],
-      ["Command · Tipoca", "Cresh Plaza secure. Their landing craft is on Dorn platform. Clear it and Kamino is ours."],
+      ["Command · Tipoca", "Cresh Plaza secure. The landing district is ahead. Their assault force is massing around Dorn."],
+      ["Command · Tipoca", "Dorn is ours. The surviving droids are sealing themselves inside the cloning facility. Finish this indoors."],
     ];
     const line = lines[p.index];
     if (line) this.radio(line[0], line[1]);
@@ -1236,7 +1257,7 @@ export class KaminoGame {
   private victory(): void {
     if (this.ended) return;
     this.phase.state = "secured";
-    this.front = 3;
+    this.front = ZONES.length - 1;
     this.updateFrontHud();
     this.audio.ui("secured");
     this.banner("Victory", "Tipoca City holds");
@@ -1254,7 +1275,7 @@ export class KaminoGame {
     this.$("#result-title").textContent = victory ? "TIPOCA CITY HOLDS" : "CLONE DOWN";
     this.$("#result-copy").textContent = victory
       ? "You fought from Aurek pad to the Separatist landing craft and pushed the droid army off Tipoca City."
-      : `You fell holding the line at ${ZONES[Math.min(3, this.front + 1)].name}. The clones will need you back in the fight.`;
+      : `You fell holding the line at ${ZONES[Math.min(ZONES.length - 1, this.front + 1)].name}. The clones will need you back in the fight.`;
     const minutes = Math.floor(this.missionTime / 60), seconds = Math.floor(this.missionTime % 60);
     const accuracy = this.shotsFired ? Math.round(this.shotsHit / this.shotsFired * 100) : 0;
     this.$("#result-stats").innerHTML = [
@@ -1264,7 +1285,7 @@ export class KaminoGame {
   }
 
   private onDroidKilled(actor: Actor, byPlayer: boolean, headshot: boolean): void {
-    this.phase.killed++;
+    if (actor.zone === this.phase.spec.enemyZone) this.phase.killed++;
     if (!byPlayer) return;
     this.kills++;
     if (headshot) this.headshots++;

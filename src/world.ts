@@ -64,6 +64,11 @@ export class World {
   readonly crashSmokeOrigin = new THREE.Vector3();
   /** Spots around the city where the wider battle flares up (for ambient fire and explosions). */
   readonly ambientPoints: THREE.Vector3[] = [];
+  /** Doorway-to-deck route used to make reinforcements visibly walk out of the lander. */
+  readonly landerDeployment = {
+    start: new THREE.Vector3(LANDER.x, 1.9, LANDER.z + 8),
+    exit: new THREE.Vector3(LANDER.x, 0, LANDER.z + 15),
+  };
   private readonly blinkers: THREE.Mesh[] = [];
   private readonly flyers: Flyer[] = [];
   private readonly smoke: Array<{ sprite: THREE.Sprite; age: number; life: number; velocity: THREE.Vector3; start: THREE.Vector3 }> = [];
@@ -82,11 +87,14 @@ export class World {
     const b = this.batcher;
     ZONES.forEach((zone, index) => {
       b.chunk = zone.id;
-      this.platform(zone.center.x, zone.center.y, zone.radius, 0, this.gapsFor(index), zone.id === "A" ? "AUREK 01" : zone.id === "D" ? "DORN 04" : zone.id === "B" ? "BESH 02" : "CRESH 03", index + 3, true);
+      const labels: Record<Zone["id"], string> = { A: "AUREK 01", B: "BESH 02", C: "CRESH 03", D: "DORN 04", E: "TIPOCA 05" };
+      this.platform(zone.center.x, zone.center.y, zone.radius, 0, this.gapsFor(index), labels[zone.id], index + 3, true);
       for (const cover of zone.cover) this.cover(zone, index, cover.kind, cover.x, cover.z, cover.rotation ?? 0);
       this.floodlight(zone, index);
       this.captureMarker(zone);
     });
+    b.chunk = "E";
+    this.cloningFacility(ZONES[4]);
     BRIDGES.forEach((bridge, index) => {
       b.chunk = `bridge${index}`;
       this.bridge(bridge);
@@ -269,6 +277,45 @@ export class World {
     }
   }
 
+  /** Final objective: a roofed cloning annex entered from the landing district. */
+  private cloningFacility(zone: Zone): void {
+    const b = this.batcher, m = this.m;
+    const x = zone.center.x, z = zone.center.y;
+    const wall = (width: number, height: number, depth: number, px: number, py: number, pz: number, solid = true) => {
+      b.place(new THREE.BoxGeometry(width, height, depth), m.hull, { x: px, y: py, z: pz }, undefined, undefined, { uvScale: 1 / 5 });
+      if (solid) this.nav.addBox(px, pz, width, depth, 0, py + height / 2);
+    };
+    // The northern face is split around a broad breach, making the player cross a clear threshold
+    // from the rain and open firefight into a confined, defended final arena.
+    wall(16, 6.8, .9, x - 12, 3.4, z + 19);
+    wall(16, 6.8, .9, x + 12, 3.4, z + 19);
+    wall(40, 6.8, .9, x, 3.4, z - 19);
+    wall(.9, 6.8, 38, x - 20, 3.4, z);
+    wall(.9, 6.8, 38, x + 20, 3.4, z);
+    // Door frame and a low, ribbed ceiling make the enclosure read as an interior while preserving
+    // sightlines through the main hall.
+    wall(.9, 7.5, 1.5, x - 4.1, 3.75, z + 19, false);
+    wall(.9, 7.5, 1.5, x + 4.1, 3.75, z + 19, false);
+    wall(8.8, .8, 1.5, x, 7.1, z + 19, false);
+    b.place(new THREE.BoxGeometry(39, .3, 37), m.hullDark, { x, y: 7.45, z }, undefined, undefined, { uvScale: 1 / 6, cast: false });
+    for (let dz = -14; dz <= 14; dz += 7) {
+      b.place(new THREE.BoxGeometry(39, .32, .4), m.trim, { x, y: 7.2, z: z + dz }, undefined, undefined, { cast: false });
+      b.place(new THREE.BoxGeometry(38, .05, .08), m.coolLight, { x, y: 7.02, z: z + dz }, undefined, undefined, { cast: false, shoot: false });
+    }
+    // Interior columns divide the room into firing lanes and give both sides meaningful cover.
+    for (const [ox, oz] of [[-12, 7], [12, 7], [-12, -7], [12, -7]] as const) {
+      b.place(new THREE.CylinderGeometry(.72, .95, 7, 12), m.hullDark, { x: x + ox, y: 3.5, z: z + oz }, undefined, undefined, { uvScale: 1 / 4 });
+      b.place(new THREE.CylinderGeometry(.78, .78, .08, 12), m.warmLight, { x: x + ox, y: 6.9, z: z + oz }, undefined, undefined, { cast: false, shoot: false });
+      this.nav.addCircle(x + ox, z + oz, .95, 7);
+    }
+    const entryLight = new THREE.PointLight(0x9bdcff, 28, 18, 2);
+    entryLight.position.set(x, 5.4, z + 16);
+    this.scene.add(entryLight);
+    const innerLight = new THREE.PointLight(0xffc487, 20, 17, 2);
+    innerLight.position.set(x, 5, z - 11);
+    this.scene.add(innerLight);
+  }
+
   // ---------------------------------------------------------------- props
 
   private cover(zone: Zone, zoneIndex: number, kind: string, lx: number, lz: number, rotation: number): void {
@@ -348,7 +395,7 @@ export class World {
 
   private floodlight(zone: Zone, index: number): void {
     const b = this.batcher, m = this.m;
-    const angle = [Math.PI * .25, -Math.PI * .2, Math.PI * .8, Math.PI * .15][index];
+    const angle = [Math.PI * .25, -Math.PI * .2, Math.PI * .8, Math.PI * .15, Math.PI * .72][index] ?? Math.PI * .25;
     const r = zone.radius - .9;
     const x = zone.center.x + Math.cos(angle) * r, z = zone.center.y + Math.sin(angle) * r;
     const height = 11;
@@ -408,7 +455,7 @@ export class World {
   }
 
   private parkedLander(): void {
-    const { group, lights, solids, rampEnd } = buildLander(this.m);
+    const { group, lights, solids, rampEnd, rampStart, rampHeight } = buildLander(this.m);
     group.position.set(LANDER.x, 0, LANDER.z);
     this.batcher.addObject(group, { cast: true, uvScale: 1 / 5 });
     void lights;
@@ -418,6 +465,9 @@ export class World {
     }
     // Ramp side rails keep droids flowing out of the front.
     for (const s of [-1, 1]) this.nav.addBox(LANDER.x + s * 1.9, LANDER.z + rampEnd - 3.5, .4, 7, 0, 2);
+    // Begin just inside the hold so the hull hides creation; the first visible frame is an exit.
+    this.landerDeployment.start.set(LANDER.x, rampHeight, LANDER.z + rampStart - .8);
+    this.landerDeployment.exit.set(LANDER.x, 0, LANDER.z + rampEnd + .15);
     const interior = new THREE.PointLight(0xff9a50, 30, 14, 2);
     interior.position.set(LANDER.x, 2.6, LANDER.z + rampEnd - 5.5);
     this.scene.add(interior);

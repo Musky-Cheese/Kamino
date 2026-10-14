@@ -183,7 +183,8 @@ export class VolumetricPass extends Pass {
         uCameraWorld: { value: new THREE.Matrix4() },
         uCameraPosition: { value: new THREE.Vector3() },
         uTime: { value: 0 },
-        uDensity: { value: .055 },
+        // A thinner atmosphere keeps shafts visible without turning every lamp into a white veil.
+        uDensity: { value: .032 },
         uFlash: { value: 0 },
         uSpotCount: { value: 0 },
         uSpotPos: { value: v3(MAX_SPOTS) },
@@ -369,7 +370,8 @@ export class CompositePass extends Pass {
             float a = float(i) * 1.2566;
             volume += texture2D(tVolume, vUv + vec2(cos(a), sin(a)) * uTexel * 2.5).rgb;
           }
-          color.rgb += volume / 5. * uVolumeStrength;
+          // Prevent overlapping lamps and lightning from flooding the whole frame with haze.
+          color.rgb += min(volume / 5., vec3(1.15)) * uVolumeStrength;
           gl_FragColor = color;
         }`,
     });
