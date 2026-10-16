@@ -105,10 +105,13 @@ export class WetReflections {
     const previousTarget = renderer.getRenderTarget();
     const strength = this.uniforms.uReflectStrength.value;
     this.uniforms.uReflectStrength.value = 0;
+    // The deck shaders sample this target; leaving it bound while drawing into it is a GL feedback loop.
+    this.uniforms.tReflect.value = null;
     renderer.setRenderTarget(this.target);
     renderer.clear();
     renderer.render(scene, virtual);
     renderer.setRenderTarget(previousTarget);
+    this.uniforms.tReflect.value = this.target.texture;
     this.uniforms.uReflectStrength.value = strength || 1;
     renderer.shadowMap.autoUpdate = shadowAuto;
     hidden.forEach((object, i) => object.visible = visibility[i]);

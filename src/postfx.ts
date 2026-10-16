@@ -303,51 +303,313 @@ export class VolumetricPass extends Pass {
   }
 }
 
+// ------------------------------------------------------------------ heat haze
+
+export const HAZE_LAYER = 7;
+
+type HazeQuad = { mesh: THREE.Mesh; material: THREE.ShaderMaterial; ttl: number; life: number; rise: number; peak: number };
+
+/**
+ * Heat shimmer. Vertical billboards over fires and explosions render rising-noise UV offsets into a
+ * half-resolution buffer (depth-tested against the scene in the shader), which the composite pass
+ * uses to refract the image behind them.
+ */
+export class HeatHazePass extends Pass {
+  readonly target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
+  private readonly quads: HazeQuad[] = [];
+  private readonly geometry = new THREE.PlaneGeometry(1, 1);
+  private readonly clearColor = new THREE.Color();
+  private readonly shared = { ...depthUniforms(), uTime: { value: 0 }, uResolution: { value: new THREE.Vector2(1, 1) } };
+
+  constructor(private readonly scene: THREE.Scene, private readonly camera: THREE.PerspectiveCamera, private readonly scenePass: ScenePass) {
+    super();
+    this.needsSwap = false;
+  }
+
+  /** A shimmering column `width` × `height` metres rising from `position`. Infinite life = persistent. */
+  spawn(position: THREE.Vector3, width: number, height: number, strength: number, life = Infinity, rise = 0): THREE.Mesh {
+    const material = new THREE.ShaderMaterial({
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        tDepth: this.shared.tDepth,
+        uTime: this.shared.uTime,
+        uResolution: this.shared.uResolution,
+        uSize: { value: new THREE.Vector2(width, height) },
+        uStrength: { value: strength },
+        uSeed: { value: Math.random() * 100 },
+      },
+      vertexShader: /* glsl */ `
+        uniform vec2 uSize;
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          vec3 center = (modelMatrix * vec4(0., 0., 0., 1.)).xyz;
+          vec3 toCamera = cameraPosition - center;
+          vec3 right = normalize(cross(vec3(0., 1., 0.), toCamera));
+          vec3 world = center + right * position.x * uSize.x + vec3(0., 1., 0.) * (position.y + .5) * uSize.y;
+          gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.);
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D tDepth;
+        uniform vec2 uResolution;
+        uniform float uTime, uStrength, uSeed;
+        varying vec2 vUv;
+        float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+        float vnoise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          vec2 u = f * f * (3. - 2. * f);
+          return mix(mix(hash12(i), hash12(i + vec2(1, 0)), u.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), u.x), u.y);
+        }
+        void main() {
+          // Hidden behind nearer geometry: the scene depth was resolved before this pass.
+          if (texture2D(tDepth, gl_FragCoord.xy / uResolution).x < gl_FragCoord.z - 1e-5) discard;
+          vec2 q = vec2(vUv.x * 2.2, vUv.y * 1.4 - uTime * .9) + uSeed;
+          vec2 offset = vec2(vnoise(q * 5.) + vnoise(q * 11.) * .5, vnoise(q * 5. + 7.7) + vnoise(q * 11. + 3.1) * .5) / 1.5 - .5;
+          float across = smoothstep(0., .4, 1. - abs(vUv.x - .5) * 2.);
+          float along = smoothstep(0., .12, vUv.y) * (1. - smoothstep(.35, 1., vUv.y));
+          gl_FragColor = vec4(offset * across * along * uStrength, 0., 1.);
+        }`,
+    });
+    const mesh = new THREE.Mesh(this.geometry, material);
+    mesh.position.copy(position);
+    mesh.frustumCulled = false;
+    mesh.layers.set(HAZE_LAYER);
+    this.scene.add(mesh);
+    this.quads.push({ mesh, material, ttl: life, life, rise, peak: strength });
+    return mesh;
+  }
+
+  setSize(width: number, height: number): void {
+    const w = Math.max(1, Math.floor(width / 2)), h = Math.max(1, Math.floor(height / 2));
+    this.target.setSize(w, h);
+    this.shared.uResolution.value.set(w, h);
+  }
+
+  render(renderer: THREE.WebGLRenderer, _write: THREE.WebGLRenderTarget, _read: THREE.WebGLRenderTarget, delta: number): void {
+    this.shared.uTime.value += delta;
+    for (let i = this.quads.length - 1; i >= 0; i--) {
+      const quad = this.quads[i];
+      if (!Number.isFinite(quad.ttl)) continue;
+      quad.ttl -= delta;
+      if (quad.ttl <= 0) {
+        this.scene.remove(quad.mesh);
+        quad.material.dispose();
+        this.quads.splice(i, 1);
+        continue;
+      }
+      const t = quad.ttl / quad.life;
+      quad.mesh.position.y += quad.rise * delta;
+      quad.material.uniforms.uStrength.value = quad.peak * Math.min(1, t * 3);
+    }
+    syncCamera(this.shared, this.camera, this.scenePass.depth);
+    // Offsets accumulate additively on zero; the scene background and fog must stay out of it.
+    renderer.getClearColor(this.clearColor);
+    const clearAlpha = renderer.getClearAlpha();
+    renderer.setClearColor(0x000000, 0);
+    renderer.setRenderTarget(this.target);
+    renderer.clear();
+    if (this.quads.length > 0) {
+      const mask = this.camera.layers.mask;
+      const shadowAuto = renderer.shadowMap.autoUpdate;
+      const background = this.scene.background;
+      const autoClear = renderer.autoClear;
+      renderer.shadowMap.autoUpdate = false;
+      renderer.autoClear = false;
+      this.scene.background = null;
+      this.camera.layers.set(HAZE_LAYER);
+      renderer.render(this.scene, this.camera);
+      this.camera.layers.mask = mask;
+      this.scene.background = background;
+      renderer.autoClear = autoClear;
+      renderer.shadowMap.autoUpdate = shadowAuto;
+    }
+    renderer.setClearColor(this.clearColor, clearAlpha);
+  }
+}
+
+// ------------------------------------------------------------------ lens flares
+
+export const MAX_FLARES = 8;
+
+/** A bright source for the lens: `tolerance` is how far (metres) behind the sampled depth it may sit before counting as hidden. */
+export type FlareSource = { position: THREE.Vector3; color: THREE.Color; intensity: number; size: number; tolerance: number };
+
+/**
+ * Projects flare sources to the screen and measures, in a tiny render target, how much of each is
+ * visible against the scene depth (one pixel per source), so flares fade behind railings and
+ * towers without ever reading pixels back to the CPU.
+ */
+export class FlareVisibilityPass extends Pass {
+  readonly target = new THREE.WebGLRenderTarget(MAX_FLARES, 1, { type: THREE.HalfFloatType, depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+  readonly sources: FlareSource[] = [];
+  /** Screen position (uv), view distance and tolerance per projected source, shared with the composite. */
+  readonly projected = Array.from({ length: MAX_FLARES }, () => new THREE.Vector4());
+  readonly colors = Array.from({ length: MAX_FLARES }, () => new THREE.Vector4());
+  count = 0;
+  private readonly quad: FullScreenQuad;
+  private readonly material: THREE.ShaderMaterial;
+  private readonly clip = new THREE.Vector4();
+
+  constructor(private readonly camera: THREE.PerspectiveCamera, private readonly scenePass: ScenePass) {
+    super();
+    this.needsSwap = false;
+    this.material = new THREE.ShaderMaterial({
+      defines: { MAX_FLARES },
+      uniforms: { ...depthUniforms(), uFlare: { value: this.projected }, uTexel: { value: new THREE.Vector2() } },
+      vertexShader: FULLSCREEN_VERTEX,
+      fragmentShader: /* glsl */ `
+        ${DEPTH_HELPERS}
+        uniform vec4 uFlare[MAX_FLARES];
+        uniform vec2 uTexel;
+        void main() {
+          int index = int(gl_FragCoord.x);
+          vec4 flare = vec4(0.);
+          for (int i = 0; i < MAX_FLARES; i++) if (i == index) flare = uFlare[i];
+          float visible = 0.;
+          for (int ring = 1; ring <= 2; ring++) {
+            for (int k = 0; k < 8; k++) {
+              float a = float(k) * .785398 + float(ring) * .3;
+              vec2 uv = flare.xy + vec2(cos(a), sin(a)) * uTexel * (2.5 + float(ring) * 3.);
+              visible += step(flare.z - flare.w, linearDepth(uv));
+            }
+          }
+          visible = (visible + step(flare.z - flare.w, linearDepth(flare.xy))) / 17.;
+          gl_FragColor = vec4(visible, 0., 0., 1.);
+        }`,
+    });
+    this.quad = new FullScreenQuad(this.material);
+  }
+
+  setSize(width: number, height: number): void {
+    this.material.uniforms.uTexel.value.set(1 / Math.max(1, width), 1 / Math.max(1, height));
+  }
+
+  render(renderer: THREE.WebGLRenderer): void {
+    const u = this.material.uniforms;
+    syncCamera(u as unknown as ReturnType<typeof depthUniforms>, this.camera, this.scenePass.depth);
+    this.count = 0;
+    for (const source of this.sources) {
+      if (this.count >= MAX_FLARES || source.intensity <= .001) continue;
+      this.clip.set(source.position.x, source.position.y, source.position.z, 1).applyMatrix4(this.camera.matrixWorldInverse);
+      const viewDistance = -this.clip.z;
+      this.clip.applyMatrix4(this.camera.projectionMatrix);
+      if (this.clip.w <= 0) continue;
+      const x = this.clip.x / this.clip.w * .5 + .5, y = this.clip.y / this.clip.w * .5 + .5;
+      if (x < -.15 || x > 1.15 || y < -.15 || y > 1.15) continue;
+      // Fade as the source leaves the frame so streaks don't pop at the edge.
+      const edge = THREE.MathUtils.smoothstep(Math.min(x, 1 - x, y, 1 - y), -.12, .04);
+      this.projected[this.count].set(x, y, viewDistance, source.tolerance);
+      this.colors[this.count].set(source.color.r * source.intensity * edge, source.color.g * source.intensity * edge, source.color.b * source.intensity * edge, source.size);
+      this.count++;
+    }
+    renderer.setRenderTarget(this.target);
+    this.quad.render(renderer);
+  }
+}
+
 // ------------------------------------------------------------------ composite
 
 export class CompositePass extends Pass {
   private readonly quad: FullScreenQuad;
   private readonly material: THREE.ShaderMaterial;
+  private readonly previousViewProjection = new THREE.Matrix4();
+  private frames = 0;
   aoStrength = 1;
   volumeStrength = 1;
+  flareStrength = 1;
+  /** Camera motion blur amount (0 = off). */
+  motionBlur = .55;
   ads = 0;
+  /** Seconds since the last frame, used to normalise motion blur to a fixed shutter. */
+  delta = 1 / 60;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
     private readonly scenePass: ScenePass,
     private readonly ao: AmbientOcclusionPass,
     private readonly volume: VolumetricPass,
+    private readonly haze: HeatHazePass,
+    private readonly flares: FlareVisibilityPass,
   ) {
     super();
     this.material = new THREE.ShaderMaterial({
+      defines: { MAX_FLARES },
       uniforms: {
         ...depthUniforms(),
         tDiffuse: { value: null },
         tAO: { value: null },
         tVolume: { value: null },
+        tHaze: { value: null },
+        tFlareVisibility: { value: null },
         uTexel: { value: new THREE.Vector2() },
+        uAspect: { value: 1 },
         uAoStrength: { value: 1 },
         uVolumeStrength: { value: 1 },
+        uHazeStrength: { value: 1 },
+        uFlareStrength: { value: 1 },
+        uBlur: { value: 0 },
         uAds: { value: 0 },
+        uCameraWorld: { value: new THREE.Matrix4() },
+        uPreviousViewProjection: { value: new THREE.Matrix4() },
+        uFlareCount: { value: 0 },
+        uFlare: { value: flares.projected },
+        uFlareColor: { value: flares.colors },
       },
       vertexShader: FULLSCREEN_VERTEX,
       fragmentShader: /* glsl */ `
         ${DEPTH_HELPERS}
-        uniform sampler2D tDiffuse, tAO, tVolume;
+        uniform sampler2D tDiffuse, tAO, tVolume, tHaze, tFlareVisibility;
         uniform vec2 uTexel;
-        uniform float uAoStrength, uVolumeStrength, uAds;
+        uniform float uAspect, uAoStrength, uVolumeStrength, uHazeStrength, uFlareStrength, uBlur, uAds;
+        uniform mat4 uCameraWorld, uPreviousViewProjection;
+        uniform int uFlareCount;
+        uniform vec4 uFlare[MAX_FLARES], uFlareColor[MAX_FLARES];
         varying vec2 vUv;
+        const float VIEWMODEL_Z = 1.1;
+        float hash(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(.06711056, .00583715)))); }
         void main() {
-          float z = linearDepth(vUv);
-          vec4 color = texture2D(tDiffuse, vUv);
+          float depth = sceneDepth(vUv);
+          vec3 viewPos = viewPosition(vUv, depth);
+          float z = -viewPos.z;
+          // Heat shimmer refracts what's behind the fire; the rifle in your hands is never behind it.
+          vec2 haze = texture2D(tHaze, vUv).xy * uHazeStrength * .022;
+          haze *= step(VIEWMODEL_Z, z);
+          vec2 uv = vUv + haze;
+          vec4 color = texture2D(tDiffuse, uv);
+          // Camera motion blur: reproject this pixel into last frame and smear along the screen-space motion.
+          if (uBlur > 0. && z > VIEWMODEL_Z) {
+            vec4 world = uCameraWorld * vec4(viewPos, 1.);
+            vec4 previous = uPreviousViewProjection * world;
+            vec2 previousUv = previous.xy / previous.w * .5 + .5;
+            vec2 velocity = (vUv - previousUv) * uBlur;
+            float pixels = length(velocity / uTexel);
+            if (pixels > 16.) velocity *= 16. / pixels;
+            if (pixels > .75) {
+              float jitter = hash(gl_FragCoord.xy) - .5;
+              vec3 sum = color.rgb;
+              float weight = 1.;
+              for (int i = 0; i < 7; i++) {
+                float k = (float(i) + jitter) / 7. - .5;
+                vec2 tap = uv + velocity * k;
+                // Don't drag the viewmodel across the world.
+                float w = step(VIEWMODEL_Z, linearDepth(tap));
+                sum += texture2D(tDiffuse, tap).rgb * w;
+                weight += w;
+              }
+              color.rgb = sum / weight;
+            }
+          }
           // Aim-down-sights: the rifle in front of your eye goes soft while the target stays sharp.
-          if (uAds > .01 && z < 1.1) {
+          if (uAds > .01 && z < VIEWMODEL_Z) {
             vec3 sum = color.rgb;
             float weight = 1.;
             for (int i = 0; i < 12; i++) {
               float a = float(i) * 2.39996;
               vec2 offset = vec2(cos(a), sin(a)) * sqrt(float(i + 1) / 12.) * uTexel * 7. * uAds;
-              sum += texture2D(tDiffuse, vUv + offset).rgb;
+              sum += texture2D(tDiffuse, uv + offset).rgb;
               weight += 1.;
             }
             color.rgb = sum / weight;
@@ -356,9 +618,9 @@ export class CompositePass extends Pass {
           float ao = 0., aoWeight = 0.;
           for (int x = -1; x <= 1; x++) {
             for (int y = -1; y <= 1; y++) {
-              vec2 uv = vUv + vec2(float(x), float(y)) * uTexel * 2.;
-              float w = 1. / (1e-3 + abs(linearDepth(uv) - z) * 4.);
-              ao += texture2D(tAO, uv).r * w;
+              vec2 suv = vUv + vec2(float(x), float(y)) * uTexel * 2.;
+              float w = 1. / (1e-3 + abs(linearDepth(suv) - z) * 4.);
+              ao += texture2D(tAO, suv).r * w;
               aoWeight += w;
             }
           }
@@ -372,6 +634,31 @@ export class CompositePass extends Pass {
           }
           // Prevent overlapping lamps and lightning from flooding the whole frame with haze.
           color.rgb += min(volume / 5., vec3(1.15)) * uVolumeStrength;
+          // Lens flares: a hot core, an anamorphic streak and a couple of ghosts mirrored through the centre.
+          vec3 flare = vec3(0.);
+          for (int i = 0; i < MAX_FLARES; i++) {
+            if (i >= uFlareCount) break;
+            float visible = texture2D(tFlareVisibility, vec2((float(i) + .5) / float(MAX_FLARES), .5)).r;
+            if (visible <= 0.) continue;
+            vec2 source = uFlare[i].xy;
+            float size = uFlareColor[i].w;
+            vec3 tint = uFlareColor[i].rgb * visible;
+            vec2 d = (vUv - source) * vec2(uAspect, 1.);
+            float r = length(d);
+            float core = exp(-r * r / (size * size) * 3.) * .9 + exp(-r / size * 1.2) * .25;
+            float streak = exp(-abs(d.y) / (size * .09)) * exp(-abs(d.x) / (size * 7.)) * .5;
+            float ghosts = 0.;
+            vec2 axis = vec2(.5) - source;
+            float centred = 1. - smoothstep(.25, .75, length(axis));
+            for (int g = 0; g < 2; g++) {
+              vec2 at = source + axis * (1.35 + float(g) * .55);
+              float gr = length((vUv - at) * vec2(uAspect, 1.));
+              float ring = smoothstep(size * 1.8, size * 1.1, gr) * (.35 + .65 * smoothstep(size * .9, size * 1.5, gr));
+              ghosts += ring * centred * (g == 0 ? .09 : .05);
+            }
+            flare += tint * core + tint * vec3(.5, .72, 1.) * streak + tint * vec3(.55, 1., .7) * ghosts;
+          }
+          color.rgb += flare * uFlareStrength;
           gl_FragColor = color;
         }`,
     });
@@ -380,6 +667,7 @@ export class CompositePass extends Pass {
 
   setSize(width: number, height: number): void {
     this.material.uniforms.uTexel.value.set(1 / Math.max(1, width), 1 / Math.max(1, height));
+    this.material.uniforms.uAspect.value = width / Math.max(1, height);
   }
 
   render(renderer: THREE.WebGLRenderer, write: THREE.WebGLRenderTarget, read: THREE.WebGLRenderTarget): void {
@@ -390,8 +678,18 @@ export class CompositePass extends Pass {
     u.uAoStrength.value = this.ao.enabled ? this.aoStrength : 0;
     u.tVolume.value = this.volume.target.texture;
     u.uVolumeStrength.value = this.volume.enabled ? this.volumeStrength : 0;
+    u.tHaze.value = this.haze.target.texture;
+    u.uHazeStrength.value = this.haze.enabled ? 1 : 0;
+    u.tFlareVisibility.value = this.flares.target.texture;
+    u.uFlareCount.value = this.flares.enabled ? this.flares.count : 0;
+    u.uFlareStrength.value = this.flareStrength;
     u.uAds.value = this.ads;
+    u.uCameraWorld.value.copy(this.camera.matrixWorld);
+    u.uPreviousViewProjection.value.copy(this.previousViewProjection);
+    // Fixed 1/110 s shutter whatever the frame rate; the first frames have no history.
+    u.uBlur.value = this.frames++ < 2 ? 0 : this.motionBlur * Math.min(2, (1 / 110) / Math.max(this.delta, 1e-3));
     renderer.setRenderTarget(this.renderToScreen ? null : write);
     this.quad.render(renderer);
+    this.previousViewProjection.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
   }
 }

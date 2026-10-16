@@ -12,7 +12,7 @@ import { BOLT_COLORS, Effects } from "./effects";
 import { Environment } from "./environment";
 import { Materials } from "./materials";
 import { WetReflections } from "./reflections";
-import { AmbientOcclusionPass, CompositePass, ScenePass, VolumetricPass } from "./postfx";
+import { AmbientOcclusionPass, CompositePass, FlareVisibilityPass, HeatHazePass, ScenePass, VolumetricPass } from "./postfx";
 import { EnvironmentProbe } from "./envprobe";
 
 /** In-scattering colours for the volumetric pass (artistic, HDR). */
@@ -23,6 +23,15 @@ const LAMP_HAZE = new THREE.Color(1, .84, .6).multiplyScalar(.8);
 import { loadModels } from "./models";
 import { loadSurfaces } from "./surfaces";
 import { AirBattle, type Craft } from "./airbattle";
+/** Lens flare tints. */
+const FLOOD_FLARE = new THREE.Color(1, .88, .7);
+const SEARCH_FLARE = new THREE.Color(.85, .93, 1);
+const FIRE_FLARE = new THREE.Color(1, .5, .2);
+const LAMP_FLARE = new THREE.Color(1, .85, .62);
+/** Where the storm's key light sits between strikes. */
+const MOON_DIRECTION = new THREE.Vector3(-60, 90, 40).normalize();
+const MOON_COLOR = new THREE.Color(0xa9d2ff);
+const LIGHTNING_COLOR = new THREE.Color(0xdcebff);
 import { STEP_HEIGHT } from "./navigation";
 import { Viewmodel } from "./weapon";
 import { World } from "./world";
@@ -202,7 +211,13 @@ export class KaminoGame {
   private aoPass!: AmbientOcclusionPass;
   private volumePass!: VolumetricPass;
   private compositePass!: CompositePass;
+  private hazePass!: HeatHazePass;
+  private flarePass!: FlareVisibilityPass;
   private grade!: ShaderPass;
+  /** Two shadow-casting spots that stand in for whichever floodlights are nearest the player. */
+  private readonly shadowSpots: THREE.SpotLight[] = [];
+  private readonly shadowedFloods: Array<THREE.SpotLight | null> = [null, null];
+  private floodShadows = false;
   private readonly controls: PointerLockControls;
   private readonly timer = new THREE.Timer();
   private readonly raycaster = new THREE.Raycaster();
@@ -375,6 +390,96 @@ export class KaminoGame {
     const cam = this.moon.shadow.camera;
     cam.left = -48; cam.right = 48; cam.top = 48; cam.bottom = -48; cam.near = 10; cam.far = 260;
     this.scene.add(this.moon, this.moon.target);
+    // Floodlight shadows: the light count stays fixed, so no shader permutations appear mid-fight.
+    for (let i = 0; i < 2; i++) {
+      const spot = new THREE.SpotLight(0xffe4c0, 0, 60, .62, .85, 1.6);
+      spot.castShadow = true;
+      spot.shadow.mapSize.set(1024, 1024);
+      spot.shadow.bias = -.0005;
+      spot.shadow.normalBias = .03;
+      spot.shadow.camera.near = 1;
+      spot.shadow.camera.far = 60;
+      spot.shadow.autoUpdate = false;
+      spot.position.set(0, -500, 0);
+      this.scene.add(spot, spot.target);
+      this.shadowSpots.push(spot);
+    }
+  }
+
+  /**
+   * Hand the two shadow-casting spots to the floodlights nearest the player (the originals go dark
+   * while a shadow spot stands in for them). Keeps the current pair while they stay among the nearest.
+   */
+  private updateFloodShadows(): void {
+    const floods = this.world.spotLights;
+    const nearest = this.floodShadows
+      ? floods.filter((spot) => spot.position.distanceTo(this.feet) < 75)
+          .sort((a, b) => a.position.distanceToSquared(this.feet) - b.position.distanceToSquared(this.feet)).slice(0, 2)
+      : [];
+    const assigned = this.shadowedFloods.map((flood) => flood && nearest.includes(flood) ? flood : null);
+    for (const flood of nearest) {
+      if (assigned.includes(flood)) continue;
+      const slot = assigned.indexOf(null);
+      if (slot >= 0) assigned[slot] = flood;
+    }
+    for (const flood of floods) {
+      flood.userData.intensity ??= flood.intensity;
+      flood.intensity = assigned.includes(flood) ? 0 : flood.userData.intensity as number;
+    }
+    this.shadowSpots.forEach((spot, i) => {
+      const flood = assigned[i];
+      this.shadowedFloods[i] = flood;
+      spot.shadow.autoUpdate = flood !== null;
+      if (!flood) { spot.intensity = 0; spot.position.set(0, -500, 0); return; }
+      spot.position.copy(flood.position);
+      spot.target.position.copy(flood.target.position);
+      spot.color.copy(flood.color);
+      spot.intensity = flood.userData.intensity as number;
+      spot.distance = flood.distance;
+      spot.angle = flood.angle;
+      spot.penumbra = flood.penumbra;
+      spot.decay = flood.decay;
+    });
+  }
+
+  /** Floodlights, searchlights, fire, lamps and explosions that can flare the visor's lens. */
+  private updateFlares(): void {
+    const flares = this.flarePass;
+    flares.sources.length = 0;
+    if (!flares.enabled) return;
+    const eye = this.camera.position;
+    const toEye = new THREE.Vector3();
+    const beamDir = new THREE.Vector3();
+    const falloff = (distance: number, scale: number) => scale / (1 + distance * distance * .0012);
+    for (const spot of this.world.spotLights) {
+      const distance = spot.position.distanceTo(eye);
+      if (distance > 140) continue;
+      toEye.subVectors(eye, spot.position).normalize();
+      beamDir.subVectors(spot.target.position, spot.position).normalize();
+      // Brightest looking straight up the beam; a faint glint from any angle (the lens glows).
+      const cone = THREE.MathUtils.smoothstep(toEye.dot(beamDir), Math.cos(spot.angle * 1.5), Math.cos(spot.angle * .7));
+      flares.sources.push({ position: spot.position, color: FLOOD_FLARE, intensity: falloff(distance, .08 + cone * 1.1), size: THREE.MathUtils.clamp(1.3 / distance, .014, .09), tolerance: 1.2 });
+    }
+    const quaternion = new THREE.Quaternion();
+    for (const beam of this.world.searchBeams) {
+      const position = beam.getWorldPosition(new THREE.Vector3());
+      const distance = position.distanceTo(eye);
+      toEye.subVectors(eye, position).normalize();
+      beamDir.set(0, -1, 0).applyQuaternion(beam.getWorldQuaternion(quaternion));
+      const cone = THREE.MathUtils.smoothstep(toEye.dot(beamDir), .9, .985);
+      flares.sources.push({ position, color: SEARCH_FLARE, intensity: falloff(distance, .15 + cone * 2.5), size: THREE.MathUtils.clamp(2.2 / distance, .012, .08), tolerance: 3 });
+    }
+    const fire = this.world.crashFire;
+    flares.sources.push({ position: fire.position, color: FIRE_FLARE, intensity: falloff(fire.position.distanceTo(eye), .9) * fire.intensity / 320, size: .05, tolerance: 2.5 });
+    for (const light of this.effects.activeLights().slice(0, 2)) {
+      if (light.intensity < 60) continue;
+      flares.sources.push({ position: light.position, color: light.color, intensity: falloff(light.position.distanceTo(eye), Math.min(2.2, light.intensity / 400)), size: .06, tolerance: 2 });
+    }
+    const lamps = this.world.lampLights
+      .filter((lamp) => lamp.position.distanceTo(eye) < 40)
+      .sort((a, b) => a.position.distanceToSquared(eye) - b.position.distanceToSquared(eye))
+      .slice(0, 2);
+    for (const lamp of lamps) flares.sources.push({ position: lamp.position, color: LAMP_FLARE, intensity: falloff(lamp.position.distanceTo(eye), .35), size: .025, tolerance: .5 });
   }
 
   private createPostProcessing(): void {
@@ -385,11 +490,19 @@ export class KaminoGame {
     this.scenePass = new ScenePass(this.scene, this.camera, this.quality === "low" ? 0 : 4);
     this.aoPass = new AmbientOcclusionPass(this.camera, this.scenePass);
     this.volumePass = new VolumetricPass(this.camera, this.scenePass);
-    this.compositePass = new CompositePass(this.camera, this.scenePass, this.aoPass, this.volumePass);
+    this.hazePass = new HeatHazePass(this.scene, this.camera, this.scenePass);
+    this.flarePass = new FlareVisibilityPass(this.camera, this.scenePass);
+    this.compositePass = new CompositePass(this.camera, this.scenePass, this.aoPass, this.volumePass, this.hazePass, this.flarePass);
     this.composer.addPass(this.scenePass);
     this.composer.addPass(this.aoPass);
     this.composer.addPass(this.volumePass);
+    this.composer.addPass(this.hazePass);
+    this.composer.addPass(this.flarePass);
     this.composer.addPass(this.compositePass);
+    // Heat sources: the burning wreck on the dome, plus explosions as they happen.
+    const fire = this.world.crashFire.position;
+    this.hazePass.spawn(fire.clone().add(new THREE.Vector3(0, -1.5, 0)), 9, 18, .9);
+    this.effects.heat = (position, width, height, strength, life, rise) => { this.hazePass.spawn(position, width, height, strength, life, rise); };
     // Very glossy wet metal under bright lights can overflow half floats; one Inf/NaN pixel would
     // otherwise be smeared across the whole frame by bloom.
     this.composer.addPass(new ShaderPass({
@@ -426,6 +539,12 @@ export class KaminoGame {
     this.volumePass.enabled = quality !== "low";
     this.envProbe.interval = quality === "high" ? 1.5 : quality === "medium" ? 4 : Infinity;
     this.reflections.scale = quality === "high" ? .5 : .33;
+    this.hazePass.enabled = quality !== "low";
+    this.flarePass.enabled = quality !== "low";
+    this.compositePass.motionBlur = quality === "low" ? 0 : .55;
+    this.floodShadows = quality === "high";
+    // Toggling castShadow changes the light setup and recompiles materials, so do it only on preset changes.
+    for (const spot of this.shadowSpots) spot.castShadow = this.floodShadows;
     this.viewSize = { width: -1, height: -1 };
     this.syncSize();
     const shadow = quality === "high" ? 4096 : quality === "medium" ? 2048 : 1024;
@@ -764,7 +883,9 @@ export class KaminoGame {
     });
     this.reflections.render(this.renderer, this.scene, this.camera, hidden);
     this.updateVolumeLights();
+    this.updateFlares();
     this.compositePass.ads = this.ads * (1 - this.scope);
+    this.compositePass.delta = this.renderDelta;
     (this.grade.uniforms.uRain as THREE.IUniform).value = (this.started ? .28 + Math.max(0, this.camera.rotation.x) * .25 : .2) * (1 - this.indoor);
     this.composer.render(this.renderDelta);
     this.camera.quaternion.copy(saved);
@@ -813,7 +934,12 @@ export class KaminoGame {
     const texel = 96 / this.moon.shadow.mapSize.x;
     const cx = Math.round(this.feet.x / texel) * texel, cz = Math.round(this.feet.z / texel) * texel;
     this.moon.target.position.set(cx, 0, cz);
-    this.moon.position.set(cx - 60, 90, cz + 40);
+    // A strike becomes the key light: every shadow snaps toward the bolt and back as it dies.
+    const lightning = flash > .14;
+    const direction = lightning ? this.env.flash.direction.clone().setY(Math.max(.3, this.env.flash.direction.y)).normalize() : MOON_DIRECTION;
+    this.moon.position.set(cx, 0, cz).addScaledVector(direction, 113);
+    this.moon.color.copy(lightning ? LIGHTNING_COLOR : MOON_COLOR);
+    this.updateFloodShadows();
   }
 
   // ------------------------------------------------------------------ player

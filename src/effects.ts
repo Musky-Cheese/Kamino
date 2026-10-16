@@ -18,6 +18,8 @@ export const BOLT_COLORS = {
  * allocates GPU resources mid-fight and the light count (and shader permutations) stays fixed.
  */
 export class Effects {
+  /** Heat shimmer hook (the post stack owns it): position, width, height, strength, life, rise. */
+  heat: ((position: THREE.Vector3, width: number, height: number, strength: number, life: number, rise: number) => void) | null = null;
   private readonly lights: PooledLight[] = [];
   private readonly sparkMesh: THREE.InstancedMesh;
   private readonly sparks: Spark[] = [];
@@ -147,6 +149,7 @@ export class Effects {
     }
     this.sparksAt(position, new THREE.Vector3(0, 1, 0), new THREE.Color(6, 3, 1), 60, 11, 14);
     this.scorch(position.clone().setY(position.y + .02), new THREE.Vector3(0, 1, 0), 3.2 * scale);
+    this.heat?.(position, 3.2 * scale, 5.5 * scale, 1.3, 1.6, 1.8);
   }
 
   /** Fireball in open air: no scorch mark, debris sparks fall away. */
