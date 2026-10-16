@@ -442,9 +442,12 @@ export class World {
     // from the rain and open firefight into a confined, defended hall.
     wall(16, 6.8, .9, x - 12, 3.4, z + 19);
     wall(16, 6.8, .9, x + 12, 3.4, z + 19);
-    // The back wall holds the blast door into the security corridor.
-    wall(18, 6.8, .9, x - 11, 3.4, z - 19);
-    wall(18, 6.8, .9, x + 11, 3.4, z - 19);
+    // The back wall holds the blast door into the security corridor, flanked by two service doors
+    // through which the facility feeds reinforcements once the landing craft is behind the front.
+    this.wallRun("x", z - 19, x - 20, x - 2, 6.8, .9, m.hull, [{ at: x - 14, half: 1.05, height: 2.65 }]);
+    this.wallRun("x", z - 19, x + 2, x + 20, 6.8, .9, m.hull, [{ at: x + 14, half: 1.05, height: 2.65 }]);
+    this.serviceCloset(x - 14, z - 19, 0, -1);
+    this.serviceCloset(x + 14, z - 19, 0, -1);
     wall(4, 3.2, .9, x, 5.2, z - 19, false);
     this.blastDoor(ZONES.indexOf(zone), x, z - 19, 4, 3.6, .9);
     wall(.9, 6.8, 38, x - 20, 3.4, z);

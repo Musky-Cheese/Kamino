@@ -536,7 +536,10 @@ export class Battle {
       const flight = aimPoint.distanceTo(muzzle) / stats.boltSpeed;
       aimPoint.addScaledVector(target.velocity, flight * (.4 + Math.random() * .5));
       const distance = aimPoint.distanceTo(muzzle);
-      if (distance < 80 && this.lineOfSight(muzzle, aimPoint)) {
+      // Sight is checked from the eyes as well as the muzzle: a droid hugging a wall can poke its
+      // barrel through the plating, and a bolt from there would hit someone it cannot see.
+      const eyes = actor.position.clone().setY(actor.position.y + actor.height * .85);
+      if (distance < 80 && this.lineOfSight(eyes, aimPoint) && this.lineOfSight(muzzle, aimPoint)) {
         actor.noSightTimer = 0;
         const direction = aimPoint.sub(muzzle).normalize();
         const moving = target.velocity.lengthSq() > 4 ? 1.35 : 1;
@@ -605,7 +608,9 @@ export class Battle {
     const direction = to.clone().sub(from);
     const distance = direction.length();
     raycaster.set(from, direction.divideScalar(distance));
-    raycaster.far = distance - .6;
+    // Stop just short of the aim point (inside the target), not 60 cm short: anyone pressed against
+    // a wall must still be protected by it.
+    raycaster.far = Math.max(0, distance - .12);
     return raycaster.intersectObjects(this.world.shootables, false).length === 0;
   }
 

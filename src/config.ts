@@ -103,6 +103,11 @@ export const ZONES: Zone[] = [
       // Kept off the centre line so the walk to the blast door stays clear.
       { kind: "barricade", x: -5, z: -11 }, { kind: "crate", x: 5.5, z: -12.5 },
     ],
+    // Service doors in the back wall: once Dorn falls, the lander is behind the front line.
+    spawns: [
+      { start: v(-12, -163.2), exit: v(-12, -159.4) },
+      { start: v(16, -163.2), exit: v(16, -159.4) },
+    ],
   },
   {
     // A 6 m walkway with three pairs of alcoves; the solid blocks between them are the only cover.
