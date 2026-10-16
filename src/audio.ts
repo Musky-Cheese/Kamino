@@ -9,7 +9,9 @@ export type DroidLine = "roger" | "retreat" | "uhoh";
  * the procedural synth below.
  */
 const SAMPLES: Record<string, string[]> = {
-  blaster: ["blaster-1.ogg", "blaster-2.ogg", "blaster-3.ogg"],
+  // One recorded shot per side; take-to-take variety comes from pitch jitter and the synth layers below.
+  blaster: ["clone-blaster.mp3"],
+  droidBlaster: ["droid-blaster.mp3"],
   hitMetal: ["hit-metal-1.ogg", "hit-metal-2.ogg", "hit-metal-3.ogg"],
   hitArmor: ["hit-armor-1.ogg", "hit-armor-2.ogg", "hit-armor-3.ogg"],
   break: ["break-1.ogg", "break-2.ogg", "break-3.ogg"],
@@ -255,9 +257,9 @@ export class GameAudio {
     if (this.activeShots >= MAX_SHOTS / 2 && voice !== "player" && (out as GainNode).gain.value < .25) return;
     const ctx = this.ctx!;
     const t = ctx.currentTime;
-    // Clones and the player fire bright, droid rifles lower, B2 wrist guns lowest.
-    const [rate, level] = { player: [1, .62], clone: [1.06, .5], droid: [.8, .55], super: [.66, .6] }[voice];
-    const shot = this.sample("blaster", out, rate, level, 0, .1);
+    // Clones and the player fire the DC-15 recording; B1 rifles the E-5 one, B2 wrist guns the same pitched down.
+    const [rate, level] = { player: [1, .55], clone: [1.05, .42], droid: [1, .48], super: [.8, .55] }[voice];
+    const shot = this.sample(voice === "droid" || voice === "super" ? "droidBlaster" : "blaster", out, rate, level, 0, .14);
     if (shot) {
       this.activeShots++;
       shot.onended = () => this.activeShots--;
@@ -267,7 +269,7 @@ export class GameAudio {
       hp.type = "highpass";
       hp.frequency.value = 3000;
       crack.connect(hp);
-      this.envelope(hp, .12, .001, .03).connect(out);
+      this.envelope(hp, .08, .001, .025).connect(out);
       crack.start(t, Math.random()); crack.stop(t + .05);
       if (voice === "player" || voice === "super") {
         const body = ctx.createOscillator();

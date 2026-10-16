@@ -119,12 +119,13 @@ Surface textures (all CC0), converted to WebP by `scripts/fetch-textures.mjs`:
 | Leaking012A, SurfaceImperfections003 | Rain streaks, grime, glass smudges | [ambientCG](https://ambientcg.com/view?id=Leaking012A), [ambientCG](https://ambientcg.com/view?id=SurfaceImperfections003) |
 | rusty_metal_02 | Droid rust mask | [Poly Haven](https://polyhaven.com/a/rusty_metal_02) |
 
-Sound effects (all CC0) in `public/audio/`, pitched and layered in `src/audio.ts`:
+Sound effects in `public/audio/`, pitched and layered in `src/audio.ts`:
 
 | Sound | Used for | Source |
 | --- | --- | --- |
-| Sci-Fi Sounds: laserSmall, impactMetal | Blaster shots, droid debris clatter | [Kenney](https://kenney.nl/assets/sci-fi-sounds) |
-| Impact Sounds: impactMetal, impactPlate, footstep_concrete | Bolt hits, droids breaking apart, droid footsteps | [Kenney](https://kenney.nl/assets/impact-sounds) |
+| clone-blaster.mp3, droid-blaster.mp3 | DC-15 and E-5 blaster shots, pitched per gun | Supplied by the author |
+| Sci-Fi Sounds: impactMetal | Droid debris clatter | [Kenney](https://kenney.nl/assets/sci-fi-sounds), CC0 |
+| Impact Sounds: impactMetal, impactPlate, footstep_concrete | Bolt hits, droids breaking apart, droid footsteps | [Kenney](https://kenney.nl/assets/impact-sounds), CC0 |
 
 The B1 voice lines are original recordings made with the Windows text-to-speech voice and processed in-game. Rain, wind, sea, thunder and UI sounds are synthesised.
 
