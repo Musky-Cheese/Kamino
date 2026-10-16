@@ -57,9 +57,25 @@ async function write(name, image, size) {
 }
 
 const SIZE = 2048;
+/**
+ * Desaturate and lift a dark painted plate into Tipoca's white: the 2nd..99th percentile is stretched to
+ * full range, then mapped onto 140..247. Done on raw pixels because sharp's `normalise().linear()` chain
+ * left the texture untouched (mean ~41/255, which is why the facility walls rendered black).
+ */
+async function whiten(image) {
+  const { data, info } = await image.greyscale().raw().toBuffer({ resolveWithObject: true });
+  const hist = new Uint32Array(256);
+  for (const v of data) hist[v]++;
+  const percentile = (p) => { let n = 0; for (let i = 0; i < 256; i++) { n += hist[i]; if (n >= data.length * p) return i; } return 255; };
+  const lo = percentile(.02), hi = Math.max(lo + 1, percentile(.99));
+  const out = Buffer.alloc(data.length);
+  for (let i = 0; i < data.length; i++) out[i] = Math.round(140 + .42 * Math.min(255, Math.max(0, (data[i] - lo) * 255 / (hi - lo))));
+  return sharp(out, { raw: { width: info.width, height: info.height, channels: 1 } });
+}
+
 for (const [name, set] of Object.entries(SETS)) {
   let color = sharp(src(set.color)).resize(SIZE, SIZE);
-  if (set.whiten) color = color.greyscale().normalise({ lower: 2, upper: 99 }).linear(.42, 140);
+  if (set.whiten) color = await whiten(color);
   await write(`${name}_color`, color, SIZE);
   await write(`${name}_normal`, sharp(src(set.normal)).resize(SIZE, SIZE), SIZE);
   const r = set.ao ? await grey(set.ao, SIZE) : Buffer.alloc(SIZE * SIZE, 255);

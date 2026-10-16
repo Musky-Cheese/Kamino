@@ -101,8 +101,11 @@ export class Materials {
       this.trim = new THREE.MeshStandardMaterial({ color: 0x8ea3ad, metalness: .9, roughness: .22 });
       this.interior = this.hull.clone();
     }
-    this.interior.color.set(0xf6f9fa);
+    // A touch below the exterior white so the lining reads without going flat under the panel lights.
+    this.interior.color.set(0xdfe5e8);
     this.interior.roughness = .55;
+    // Mostly dielectric so the lining takes diffuse light from the fixtures instead of mirroring a dark room.
+    this.interior.metalness = .12;
     this.interiorFloor = this.deck.clone();
     this.interiorFloor.color.set(0xc4ced3);
     this.interiorFloor.roughness = .6;

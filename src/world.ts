@@ -452,6 +452,16 @@ export class World {
     this.blastDoor(ZONES.indexOf(zone), x, z - 19, 4, 3.6, .9);
     wall(.9, 6.8, 38, x - 20, 3.4, z);
     wall(.9, 6.8, 38, x + 20, 3.4, z);
+    // Clean interior lining inside the weathered shell (as in the corridor and hall), so the walls take
+    // diffuse light from the fixtures and the room reads as a room rather than a black box.
+    const lining = { uvScale: 1 / 5, cast: false, shoot: false };
+    this.box(m.interior, x - 12, 3.3, z + 18.4, 16, 6.6, .3, lining);
+    this.box(m.interior, x + 12, 3.3, z + 18.4, 16, 6.6, .3, lining);
+    this.wallRun("x", z - 18.4, x - 19.5, x - 2, 6.6, .3, m.interior, [{ at: x - 14, half: 1.05, height: 2.65 }], false, lining);
+    this.wallRun("x", z - 18.4, x + 2, x + 19.5, 6.6, .3, m.interior, [{ at: x + 14, half: 1.05, height: 2.65 }], false, lining);
+    this.box(m.interior, x - 19.4, 3.3, z, .3, 6.6, 36.8, lining);
+    this.box(m.interior, x + 19.4, 3.3, z, .3, 6.6, 36.8, lining);
+    this.box(m.interior, x, 7.28, z, 38.8, .06, 36.8, { ...lining, uvScale: 1 / 6 });
     // Door frame and a low, ribbed ceiling make the enclosure read as an interior while preserving
     // sightlines through the main hall.
     wall(.9, 7.5, 1.5, x - 4.1, 3.75, z + 19, false);
@@ -469,6 +479,11 @@ export class World {
       b.place(new THREE.CylinderGeometry(.72, .95, 7, 12), m.hullDark, { x: x + ox, y: 3.5, z: z + oz }, undefined, undefined, { uvScale: 1 / 4 });
       b.place(new THREE.CylinderGeometry(.78, .78, .08, 12), m.warmLight, { x: x + ox, y: 6.9, z: z + oz }, undefined, undefined, { cast: false, shoot: false });
       this.nav.addCircle(x + ox, z + oz, .95, 7);
+      // Each column cap is a real fixture, so the side lanes and the walls behind them get shape.
+      const capLight = new THREE.PointLight(0xffd9a8, 11, 14, 2);
+      capLight.position.set(x + ox, 6.4, z + oz);
+      this.scene.add(capLight);
+      this.lampLights.push(capLight);
     }
     const entryLight = new THREE.PointLight(0x9bdcff, 28, 18, 2);
     entryLight.position.set(x, 5.4, z + 16);
@@ -532,6 +547,11 @@ export class World {
           this.nav.addBox(lx, at, .5, 3.6, 0, 2.2);
         }
         this.box(m.warmLight, cx + s * 5, H - .02, at, 1.4, .03, 1.4, { cast: false, shoot: false });
+        // The alcove ceiling panel lights its own bay, so the wall blocks and anyone hugging them read.
+        const bayLight = new THREE.PointLight(0xffd9a8, 5, 12, 2);
+        bayLight.position.set(cx + s * 4.6, H - .7, at);
+        this.scene.add(bayLight);
+        this.lampLights.push(bayLight);
         this.enemyCover[zoneIndex].push({ position: new THREE.Vector2(inner, at + 1.7), zone: zoneIndex, taken: false });
         this.allyCover[zoneIndex].push({ position: new THREE.Vector2(inner, at - 1.7), zone: zoneIndex, taken: false });
       }
@@ -544,7 +564,7 @@ export class World {
     this.nav.addRoof(x0 - 2.8, z1, x1 + 2.8, z0, H);
 
     for (const dz of [9, -9]) {
-      const light = new THREE.PointLight(0xdcefff, 16, 18, 2);
+      const light = new THREE.PointLight(0xdcefff, 11, 18, 2);
       light.position.set(cx, H - .6, cz + dz);
       this.scene.add(light);
       this.lampLights.push(light);
@@ -630,10 +650,11 @@ export class World {
     this.vaultRoof(cx, H + .4, cz, room.hw + .3, room.hd * 2 + .6, 6.5);
     this.nav.addRoof(x0 - 2.8, z1 - 2.8, x1 + 2.8, z0, H);
 
+    // Eased back a little now the room fill carries the walls; these stay the accents.
     const lights: Array<[number, number, number, number, number]> = [
-      [0xffd6a8, z0 - 5, 9, 40, 26],
-      [0x8fe8ff, cz, 10, 60, 34],
-      [0xc6ecff, z1 + 7, 8, 46, 28],
+      [0xffd6a8, z0 - 5, 9, 32, 26],
+      [0x8fe8ff, cz, 10, 48, 34],
+      [0xc6ecff, z1 + 7, 8, 38, 28],
     ];
     for (const [color, z, y, intensity, distance] of lights) {
       const light = new THREE.PointLight(color, intensity, distance, 2);

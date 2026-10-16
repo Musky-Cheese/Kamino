@@ -32,6 +32,11 @@ const LAMP_FLARE = new THREE.Color(1, .85, .62);
 const MOON_DIRECTION = new THREE.Vector3(-60, 90, 40).normalize();
 const MOON_COLOR = new THREE.Color(0xa9d2ff);
 const LIGHTNING_COLOR = new THREE.Color(0xdcebff);
+/** Hemisphere fill: storm sky over black water outside; indoors, lit walls and a pale floor bounce light back. */
+const OUTDOOR_SKY = new THREE.Color(0x7aa4bb);
+const OUTDOOR_GROUND = new THREE.Color(0x06090c);
+const INDOOR_SKY = new THREE.Color(0x9db3c0);
+const INDOOR_GROUND = new THREE.Color(0x3a4248);
 import { STEP_HEIGHT } from "./navigation";
 import { Viewmodel } from "./weapon";
 import { World } from "./world";
@@ -155,7 +160,7 @@ const GRADE_SHADER = {
       float desat = uLowHealth * .55;
       col = mix(col, vec3(luma), desat);
       col += vec3(.55, .02, 0.) * uLowHealth * smoothstep(.12, .5, r2) * (.55 + .45 * sin(uTime * 7.));
-      col *= 1. - smoothstep(.18, .75, r2) * (.55 + uAds * .25);
+      col *= 1. - smoothstep(.2, .8, r2) * (.36 + uAds * .25);
       if (uScope > .001) {
         // The eyepiece closes in from the screen edges as the scope comes up to your eye.
         float radius = mix(1.25, SCOPE_R, smoothstep(0., 1., uScope));
@@ -226,8 +231,10 @@ export class KaminoGame {
   private readonly reflections = new WetReflections();
   private readonly keys = new Set<string>();
   private readonly fog = new THREE.FogExp2(0x0b1b25, .0085);
-  private readonly hemi = new THREE.HemisphereLight(0x7aa4bb, 0x06090c, .55);
+  private readonly hemi = new THREE.HemisphereLight(OUTDOOR_SKY, OUTDOOR_GROUND, .55);
   private readonly moon = new THREE.DirectionalLight(0xa9d2ff, 1.35);
+  /** Soft fill carried behind the helmet, faded in indoors so nearby walls and droids keep their shape. */
+  private readonly fill = new THREE.PointLight(0xd6e6ee, 0, 18, 1);
   private materials!: Materials;
   private world!: World;
   private env!: Environment;
@@ -358,6 +365,8 @@ export class KaminoGame {
     });
     await progress(.75, "Deploying the clone army…");
     this.camera.add(this.viewmodel.root);
+    this.fill.position.set(0, .7, 1.3);
+    this.camera.add(this.fill);
     this.scene.add(this.camera);
     this.camera.position.copy(this.feet).setY(this.feet.y + EYE_HEIGHT);
     this.camera.lookAt(0, 1.5, 30);
@@ -927,7 +936,12 @@ export class KaminoGame {
   private updateLighting(): void {
     // Indoors the storm only reaches in through windows and doorways.
     const flash = this.env.flash.strength * (1 - this.indoor * .8);
-    this.hemi.intensity = .32 + flash * 2.4;
+    // Under a roof the fill comes from the room itself: a lifted shadow floor so walls, cover and droids
+    // read as shapes instead of silhouettes, while the strips and panels stay the bright accents.
+    this.hemi.color.lerpColors(OUTDOOR_SKY, INDOOR_SKY, this.indoor);
+    this.hemi.groundColor.lerpColors(OUTDOOR_GROUND, INDOOR_GROUND, this.indoor);
+    this.hemi.intensity = THREE.MathUtils.lerp(.32, .55, this.indoor) + flash * 2.4;
+    this.fill.intensity = 2 * this.indoor;
     this.moon.intensity = (1.1 + flash * 5) * (1 - this.indoor * .7);
     this.fog.color.setRGB(.024 + flash * .1, .058 + flash * .14, .082 + flash * .17);
     // Keep the shadow frustum centred on the player, snapped to texels to avoid shimmering.
