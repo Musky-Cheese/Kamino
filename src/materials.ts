@@ -24,6 +24,8 @@ export class Materials {
   readonly windowLit: THREE.MeshStandardMaterial;
   readonly warmLight: THREE.MeshStandardMaterial;
   readonly coolLight: THREE.MeshStandardMaterial;
+  /** Lamp heads: dimmer than the strips so a sphere at eye height does not blow out to white. */
+  readonly lampGlow: THREE.MeshStandardMaterial;
   readonly redLight: THREE.MeshStandardMaterial;
   readonly amberLight: THREE.MeshStandardMaterial;
   readonly hazard: THREE.MeshStandardMaterial;
@@ -120,8 +122,9 @@ export class Materials {
       this.window.roughness = .35;
     }
     this.windowLit = glow(0xffb978, 1.5);
-    this.warmLight = glow(0xffd79a, 2.6);
-    this.coolLight = glow(0x7fdcff, 2.4);
+    this.warmLight = glow(0xffd79a, 1.7);
+    this.coolLight = glow(0x7fdcff, 1.6);
+    this.lampGlow = glow(0xffd79a, 1.05);
     this.redLight = glow(0xff3020, 6);
     this.amberLight = glow(0xff9a3a, 4);
     this.hazard = new THREE.MeshStandardMaterial({ color: 0xd9a043, metalness: .3, roughness: .5 });

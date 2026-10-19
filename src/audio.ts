@@ -20,6 +20,9 @@ const SAMPLES: Record<string, string[]> = {
   roger: ["droid-roger.wav"],
   retreat: ["droid-retreat.wav"],
   uhoh: ["droid-uhoh.wav"],
+  // Field recordings for the storm; the synth versions play until these have loaded.
+  rain: ["rain.ogg"],
+  thunder: ["thunder-1.ogg", "thunder-2.ogg"],
 };
 
 /** Overlapping shots beyond this are dropped (distant ones first) so big firefights don't swamp the mix. */
@@ -42,6 +45,10 @@ export class GameAudio {
   private roomSend!: GainNode;
   private room!: GainNode;
   private indoor = 0;
+  /** Everything rain feeds into (gust modulation lives here); the synth has its own fader so it can hand over to the recording. */
+  private rainBus!: GainNode;
+  private rainSynth!: GainNode;
+  private rainSynthSource!: AudioBufferSourceNode;
   private noise!: AudioBuffer;
   private brown!: AudioBuffer;
   private readonly listener = new THREE.Vector3();
@@ -131,6 +138,26 @@ export class GameAudio {
       const loaded = takes.filter((take): take is AudioBuffer => !!take);
       if (loaded.length) this.samples.set(name, loaded);
     }));
+    this.startRecordedRain();
+  }
+
+  /** Swap the procedural drizzle for the field recording once it has decoded: fade one out as the other comes in. */
+  private startRecordedRain(): void {
+    const ctx = this.ctx;
+    const takes = this.samples.get("rain");
+    if (!ctx || !takes) return;
+    const source = ctx.createBufferSource();
+    source.buffer = takes[0];
+    source.loop = true;
+    const level = ctx.createGain();
+    const t = ctx.currentTime;
+    level.gain.setValueAtTime(0, t);
+    level.gain.linearRampToValueAtTime(1, t + 2.5);
+    source.connect(level).connect(this.rainBus);
+    source.start(t, Math.random() * takes[0].duration);
+    this.rainSynth.gain.setValueAtTime(this.rainSynth.gain.value, t);
+    this.rainSynth.gain.linearRampToValueAtTime(0, t + 2.5);
+    this.rainSynthSource.stop(t + 3);
   }
 
   /** Play a random take of `name` (never the same take twice running); null if it isn't loaded. */
@@ -396,15 +423,25 @@ export class GameAudio {
     if (!ctx || ctx.state !== "running") return;
     const delay = Math.min(5, distance / 343);
     const t = ctx.currentTime + delay;
+    const near = distance < 350;
+    if (this.samples.has("thunder")) {
+      // Recorded clap: slowed a touch for weight, muffled and quieter the further away the strike was.
+      const lp = ctx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = near ? 7000 : 900 - Math.min(500, (distance - 350) * .6);
+      lp.connect(this.outdoorTone);
+      this.sample("thunder", lp, near ? .92 : .8, strength * (near ? .9 : .45), delay, .12);
+      return;
+    }
     const source = this.noiseSource(this.brown);
     const lp = ctx.createBiquadFilter();
     lp.type = "lowpass";
-    lp.frequency.setValueAtTime(distance < 350 ? 900 : 380, t);
+    lp.frequency.setValueAtTime(near ? 900 : 380, t);
     lp.frequency.exponentialRampToValueAtTime(90, t + 5);
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0, ctx.currentTime);
     gain.gain.setValueAtTime(0, t);
-    const peak = strength * (distance < 350 ? 1.1 : .6);
+    const peak = strength * (near ? 1.1 : .6);
     gain.gain.linearRampToValueAtTime(peak, t + .08);
     for (let k = 1; k < 9; k++) gain.gain.linearRampToValueAtTime(peak * (.3 + Math.random() * .7) * (1 - k / 10), t + k * .45);
     gain.gain.exponentialRampToValueAtTime(.0001, t + 5.5);
@@ -629,20 +666,23 @@ export class GameAudio {
 
   private startAmbience(): void {
     const ctx = this.ctx!;
-    // Steady drizzle: thousands of tiny droplet ticks plus the odd fat drip ringing on metal,
-    // breathing with the wind gusts instead of a flat hiss.
-    const rain = this.noiseSource(this.rainBuffer(), true);
-    const rainTone = ctx.createBiquadFilter();
-    rainTone.type = "lowpass"; rainTone.frequency.value = 9000;
-    const rainGain = ctx.createGain();
-    rainGain.gain.value = .12;
+    // Steady drizzle, breathing with the wind gusts instead of a flat hiss. The procedural
+    // version plays first; startRecordedRain() hands over to the recording once it has loaded.
+    this.rainBus = ctx.createGain();
+    this.rainBus.gain.value = .12;
     const gust = ctx.createOscillator();
     gust.frequency.value = .07;
     const gustDepth = ctx.createGain();
     gustDepth.gain.value = .035;
-    gust.connect(gustDepth).connect(rainGain.gain);
-    rain.connect(rainTone).connect(rainGain).connect(this.outdoorTone);
-    rain.start(); gust.start();
+    gust.connect(gustDepth).connect(this.rainBus.gain);
+    this.rainBus.connect(this.outdoorTone);
+    this.rainSynthSource = this.noiseSource(this.rainBuffer(), true);
+    const rainTone = ctx.createBiquadFilter();
+    rainTone.type = "lowpass"; rainTone.frequency.value = 9000;
+    this.rainSynth = ctx.createGain();
+    this.rainSynth.gain.value = 1;
+    this.rainSynthSource.connect(rainTone).connect(this.rainSynth).connect(this.rainBus);
+    this.rainSynthSource.start(); gust.start();
 
     const sea = this.noiseSource(this.brown, true);
     const seaLp = ctx.createBiquadFilter();

@@ -31,7 +31,7 @@ Under a roof the rain stops, your visor dries, lightning only reaches in through
 - Droid and clone AI that takes cover, peeks, fires in bursts, advances, retreats across bridges and gets reinforced
 - Projectile blaster bolts with near-miss feedback, scorch marks, sparks, droids that shatter into pieces
 - DC-15A with aim-down-sights, recoil, spread, reload, ammo counter on the rifle; thermal detonators
-- Fully synthesised audio: blasters, explosions, thunder, rain, footsteps, and a B1 "roger, roger"
+- Recorded rain, thunder, blasters and impacts layered with synthesised explosions, wind, sea, UI and a B1 "roger, roger"
 - Helmet HUD with front-line tracker, objective marker, radio chatter, damage direction, kill feed
 - Low / Medium / High graphics presets, three difficulty levels
 
@@ -126,8 +126,11 @@ Sound effects in `public/audio/`, pitched and layered in `src/audio.ts`:
 | clone-blaster.mp3, droid-blaster.mp3 | DC-15 and E-5 blaster shots, pitched per gun | Supplied by the author |
 | Sci-Fi Sounds: impactMetal | Droid debris clatter | [Kenney](https://kenney.nl/assets/sci-fi-sounds), CC0 |
 | Impact Sounds: impactMetal, impactPlate, footstep_concrete | Bolt hits, droids breaking apart, droid footsteps | [Kenney](https://kenney.nl/assets/impact-sounds), CC0 |
+| rain.ogg | Rain loop (take 1 of "Rain (loopable)", level-matched) | [Ylmir on OpenGameArt](https://opengameart.org/content/rain-loopable), CC0 |
+| thunder-1.ogg | Thunder clap (sfx100v2_thunder_01 from "100 CC0 SFX #2") | [rubberduck on OpenGameArt](https://opengameart.org/content/100-cc0-sfx-2), CC0 |
+| thunder-2.ogg | Long rolling thunder (cut from "Rain + Long Thunder" at 20 s) | [WuxiaScrub on OpenGameArt](https://opengameart.org/content/rain-long-thunder), CC0 |
 
-The B1 voice lines are original recordings made with the Windows text-to-speech voice and processed in-game. Rain, wind, sea, thunder and UI sounds are synthesised.
+The B1 voice lines are original recordings made with the Windows text-to-speech voice and processed in-game. Wind, sea and UI sounds are synthesised; a synthesised rain and thunder fallback plays until the recordings have loaded.
 
 ## Project status
 

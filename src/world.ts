@@ -247,7 +247,7 @@ export class World {
         const a = a0 + i / count * length;
         const px = cx + Math.cos(a) * (R + .11), pz = cz + Math.sin(a) * (R + .11);
         b.place(new THREE.CylinderGeometry(.13, .16, .35, 10), m.hullDark, { x: px, y: y + height + .17, z: pz }, undefined, undefined, { shoot: false });
-        b.place(new THREE.SphereGeometry(.14, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), m.warmLight, { x: px, y: y + height + .34, z: pz }, undefined, undefined, { cast: false, shoot: false });
+        b.place(new THREE.SphereGeometry(.14, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), m.lampGlow, { x: px, y: y + height + .34, z: pz }, undefined, undefined, { cast: false, shoot: false });
       }
     }
   }
@@ -288,7 +288,7 @@ export class World {
         for (let z = -length / 2 + 3; z < length / 2 - 2; z += 7) {
           local(new THREE.CylinderGeometry(.11, .15, 3.2, 10), m.hullDark, s * (bridge.halfWidth - .13), 2.1, z, { shoot: false });
           local(new THREE.BoxGeometry(.05, 2.2, .05), m.warmLight, s * (bridge.halfWidth - .26), 2.2, z, { cast: false, shoot: false });
-          local(new THREE.SphereGeometry(.2, 10, 8), m.warmLight, s * (bridge.halfWidth - .13), 3.75, z, { cast: false, shoot: false });
+          local(new THREE.SphereGeometry(.17, 10, 8), m.lampGlow, s * (bridge.halfWidth - .13), 3.75, z, { cast: false, shoot: false });
         }
       }
     }
